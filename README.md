@@ -1,4 +1,4 @@
-# 2024 Docker Workshop
+# 2025 Docker Workshop
 
 ## Introduction to Docker
 
@@ -85,7 +85,7 @@ Let's take a look at the [Docker docs](https://docs.docker.com/language/python/b
 
 ```Docker
 # What is our base image? Since we want to create a python application, we need a base image that has python. Luckily, we can continue making use of open-source images for this as well. There are many types of images that provide python, but for this example i'll choose 
-FROM python:3.8-slim-buster
+FROM python:3.12-slim-bookworm
 
 # What directory (inside the container) should we be working from?
 WORKDIR /app
@@ -444,7 +444,7 @@ Let's create a container to utilize the code in `redis_client_app/redis_client.p
 
 ```Docker
 # Use the small python image, no need for fancy add-ons
-FROM python:3.8-slim-buster
+FROM python:3.12-slim-bookworm
 
 # Use /app as our working directory
 WORKDIR /app

@@ -1,15 +1,14 @@
-from django.conf.urls import url
+from django.urls import path
 
 from . import views
 
 app_name = 'polls'
 urlpatterns = [
-    url(r'^$', views.IndexView.as_view(), name='index'),
-    url(r'^(?P<pk>[0-9]+)/$', views.DetailView.as_view(), name='detail'),
-    url(r'^(?P<pk>[0-9]+)/results/$', views.ResultsView.as_view(), name='results'),
-    url(r'^(?P<question_id>[0-9]+)/vote/$', views.vote, name='vote'),
-    url(r'^sleep$', views.i_take_so_long_to_load, name='sleep'),
-    url(r'^sleep/(?P<how_long>[0-9]+)$', views.i_take_so_long_to_load, name='sleep'),
-    url(r'^error$', views.raise_error, name='error'),
-
+    path('', views.IndexView.as_view(), name='index'),
+    path('<int:pk>/', views.DetailView.as_view(), name='detail'),
+    path('<int:pk>/results/', views.ResultsView.as_view(), name='results'),
+    path('<int:question_id>/vote/', views.vote, name='vote'),
+    path('sleep', views.i_take_so_long_to_load, name='sleep'),
+    path('sleep/<int:how_long>', views.i_take_so_long_to_load, name='sleep'),
+    path('error', views.raise_error, name='error'),
 ]

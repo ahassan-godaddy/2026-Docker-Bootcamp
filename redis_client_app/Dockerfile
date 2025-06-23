@@ -1,5 +1,5 @@
 # Use the small python image, no need for fancy add-ons
-FROM python:3.8-slim-buster
+FROM python:3.12-slim-bookworm
 
 # Use /app as our working directory
 WORKDIR /app
