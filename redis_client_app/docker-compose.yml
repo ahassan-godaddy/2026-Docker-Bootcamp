@@ -15,7 +15,7 @@ services:
 
     # Define redis properties
     cache:
-        image: 'redis:latest'
+        image: 'valkey/valkey:8-alpine'
         volumes: 
             - redis_storage:/data
         networks:
@@ -31,6 +31,13 @@ services:
             REDIS_HOST: cache
         entrypoint: "/bin/sh"
         tty: true
+        develop:
+            watch:
+                - action: sync
+                  path: .
+                  target: /app
+                - action: rebuild
+                  path: requirements.txt
         healthcheck:
             test: ["CMD", "python", "redis_client.py", "check_redis"] 
             interval: 3s

@@ -1,5 +1,9 @@
 django_app_for_part_2/Django/data/**
 django_app_for_part_2/Django/static/**
+django_app_for_part_2/Django/secrets/**
+django_app_for_part_2/ELK/secrets/**
+!django_app_for_part_2/Django/secrets/*.example.txt
+!django_app_for_part_2/ELK/secrets/*.example.txt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

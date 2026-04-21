@@ -1,17 +1,19 @@
-# Use the small python image, no need for fancy add-ons
-FROM python:3.12-slim-bookworm
+# syntax=docker/dockerfile:1
+FROM python:3.13-slim-trixie AS builder
 
-# Use /app as our working directory
-WORKDIR /app
-
-# Copy our requirements
+WORKDIR /build
 COPY requirements.txt requirements.txt
+RUN pip install --upgrade pip && pip wheel --wheel-dir /wheels -r requirements.txt
 
-# Install our requirements
-RUN pip3 install -r requirements.txt
+FROM python:3.13-slim-trixie
 
-# Copy the rest of our project
+WORKDIR /app
+COPY requirements.txt requirements.txt
+COPY --from=builder /wheels /wheels
+RUN pip install --no-cache-dir --no-index --find-links=/wheels -r requirements.txt && rm -rf /wheels
 COPY . .
 
-# Run our app
+RUN useradd --system --uid 1001 --create-home app && chown -R app:app /app
+USER app
+
 ENTRYPOINT [ "python3", "redis_client.py"]

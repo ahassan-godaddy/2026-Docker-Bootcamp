@@ -1,11 +1,11 @@
-# 2025 Bootcamp CI/CD & Docker (pt. 2)
+# 2026 Bootcamp CI/CD & Docker (pt. 2)
 
 <!-- TOC -->
 
 - [Bootcamp CI/CD & Docker pt. 2](#bootcamp-cicd--docker-pt-2)
     - [The Power of Docker](#the-power-of-docker)
-        - [docker-compose refresher](#docker-compose-refresher)
-    - [Advanced Docker Compose Example](#advanced-docker-compose-example)
+        - [docker compose refresher](#docker compose-refresher)
+    - [Advanced Docker Compose Example](#advanced-docker compose-example)
         - [Step 1: Create Django Project](#step-1-create-django-project)
             - [Deploy Django Service](#deploy-django-service)
             - [Exec into Django](#exec-into-django)
@@ -25,9 +25,9 @@
             - [Using Override Files](#using-override-files)
         - [Step 4: Use the Django Site to generate some Transactions](#step-4-use-the-django-site-to-generate-some-transactions)
         - [Step 5: Dive into APM](#step-5-dive-into-apm)
-    - [Using docker-compose override files to perform testing](#using-docker-compose-override-files-to-perform-testing)
+    - [Using docker compose override files to perform testing](#using-docker compose-override-files-to-perform-testing)
     - [Challenges](#challenges)
-        - [Challenge 1: Run the tests using a docker-compose exec command](#challenge-1-run-the-tests-using-a-docker-compose-exec-command)
+        - [Challenge 1: Run the tests using a docker compose exec command](#challenge-1-run-the-tests-using-a-docker compose-exec-command)
         - [Challenge 2: Run the Django site on a different local port 8001](#challenge-2-run-the-django-site-on-a-different-local-port-8001)
         - [Challenge 3: Send the Database Logs to Elasticsearch](#challenge-3-send-the-database-logs-to-elasticsearch)
     - [Wrapping up](#wrapping-up)
@@ -45,11 +45,11 @@ In Part 1, you learned about:
 - Docker Commands
 - Docker-Compose
 
-In this session, we are going to expand on the concept of using docker-compose to build really powerful environments.
+In this session, we are going to expand on the concept of using docker compose to build really powerful environments.
 
 ## The Power of Docker
 
-### docker-compose refresher
+### docker compose refresher
 
 Docker-compose makes it super easy to get started with open-source software. Since it's a standardized and versioned format, you can be sure that it'll work the same across environments and ecosystems. In their words:
 
@@ -61,22 +61,22 @@ Docker-compose makes it super easy to get started with open-source software. Sin
 
 ### Step 1: Create Django Project
 
-> In this example, we are going to use the end result of the `Writing your first Django app` tutorial on their [website](https://docs.djangoproject.com/en/3.2/intro/). Don't worry, you won't have to go through the tutorial yourself, but it's important to know where this code is coming from. All this example does is provide an example Polls application written in Django. If you aren't familiar, Django is a python framework for developing dynamic and modern websites. For this tutorial, you won't need to be a Django expert, just realize that it's creating a website for you when we run our first docker-compose.
+> In this example, we are going to use the end result of the `Writing your first Django app` tutorial on their [website](https://docs.djangoproject.com/en/3.2/intro/). Don't worry, you won't have to go through the tutorial yourself, but it's important to know where this code is coming from. All this example does is provide an example Polls application written in Django. If you aren't familiar, Django is a python framework for developing dynamic and modern websites. For this tutorial, you won't need to be a Django expert, just realize that it's creating a website for you when we run our first docker compose.
 
 Here's what the first [docker-compose.yml](Django/docker-compose.yml) looks like:
 
 ```yaml
-version: "3.9"
-   
 services:
   db:
-    image: postgres
+    image: postgres:17-alpine
     volumes:
-      - ./data/db:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
     environment:
-      - POSTGRES_DB=postgres
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready" ]
       interval: 10s
@@ -84,16 +84,36 @@ services:
       retries: 5
   web:
     build: .
-    volumes:
-      - .:/code
     environment:
-      ELASTIC_APM_ENABLED: "false"
-      ELASTIC_APM_SERVICE_NAME: bootcamp-django
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    develop:
+      watch:
+        - action: sync
+          path: .
+          target: /code
+        - action: rebuild
+          path: requirements.txt
     ports:
       - "8000:8000"
+    secrets:
+      - postgres_password
     depends_on:
       db:
         condition: service_healthy
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+
+volumes:
+  pgdata:
+```
+
+Create the secret file before startup (example value shown):
+
+```bash
+$ cp secrets/postgres_password.example.txt secrets/postgres_password.txt
+$ chmod 600 secrets/postgres_password.txt
 ```
 
 The first service created is the Postgres database. This allows our Django site to store and maintain it's application state. In this example, we simply use a local directory (via `volumes`) for its database storage, and you'll see that created automatically for you by compose. We also pass through some environment variables which represent how we connect to the postgress database from Django. We have added a healthcheck for this service so that our UI doesn't start up before it's database is ready.
@@ -104,12 +124,18 @@ The second service is our [Django application](Django/). We use the `volumes` de
 
 ```bash
 $ cd django_app_for_part_2/Django/
-$ docker-compose up -d
+$ docker compose up -d
 
 
 ...
 Starting django_db_1 ... done
 Starting django_web_1 ... done
+```
+
+For live reload in Compose v2.22+, run this in another terminal:
+
+```bash
+$ docker compose watch
 ```
 
 Congrats! Your website should now be running at http://0.0.0.0:8000. The admin endpoint is running at: http://0.0.0.0:8000/admin/. The credentials for the admin endpoint are:
@@ -121,10 +147,10 @@ Password: bootcamp
 
 #### Exec into Django
 
-Using docker-compose commands, we are able to access the Django Command Line Interface (CLI) in order to run useful commands. For example, let's use the CLI to create a poll for our website.
+Using docker compose commands, we are able to access the Django Command Line Interface (CLI) in order to run useful commands. For example, let's use the CLI to create a poll for our website.
 
 ```bash
-$ docker-compose exec web python manage.py shell
+$ docker compose exec web python manage.py shell
 
 DEBUG=True
 Python 3.9.5 (default, Jun 23 2021, 15:01:51) 
@@ -233,7 +259,9 @@ Filebeat is a log shipper. The purpose of it is to feed data into Elasticsearch 
 
 ```bash
 $ cd ../ELK
-$ docker-compose up -d  # This might take a while...
+$ cp secrets/elasticsearch_password.example.txt secrets/elasticsearch_password.txt
+$ chmod 600 secrets/elasticsearch_password.txt
+$ docker compose --profile monitoring --profile ui up -d  # This might take a while...
 
 ...
 Creating es ... done
@@ -242,11 +270,11 @@ Creating elk_apm-server_1 ... done
 Creating kib              ... done
 ```
 
-After running that command, you will have a multitude of services avaiable to you. You can always check them with `docker-compose ps`.
+After running that command, you will have a multitude of services avaiable to you. You can always check them with `docker compose ps`.
 
 
 ```bash
-$ docker-compose ps
+$ docker compose ps
 
 
       Name                    Command                       State                                                 Ports                                       
@@ -266,9 +294,9 @@ You should now see your application logs from Django when you visit: http://loca
 When you perform actions on the website, such as going to a new page, you'll see those actions reflected in the logs in Kibana.
 
 This is pretty cool, but what else can we do with Kibana?
-### Step 3: Tie Application Performance Metrics (APM) into Django
+### Step 3: Tie OpenTelemetry (OTel) into Django
 
-To do this, we are going to introduce the concepts of a docker-compose override.
+To do this, we are going to introduce the concepts of a docker compose override.
 
 > What does an override do? Well it allows you to override specific properties in the main docker-compose.yml file. Why would we want to do this? There are a lot of reasons to use override files, but we are going to focus on one for this session.
 
@@ -280,18 +308,16 @@ To do this, we are going to introduce the concepts of a docker-compose override.
     - The various override files for the environments would contain differentiating config options. These files might include overrides for the environment variables sent to the application, which networks to use, which volumes to use, etc.
 
 
-In this example, we have a file called [docker-compose.apm.yml](Django/docker-compose.apm.yml). 
+In this example, we have a file called [docker-compose.otel.yml](Django/docker-compose.otel.yml). 
 
 ```yml
-version: "3.9"
-   
 services:
   web:
     environment:
-      ELASTIC_APM_SERVER_URL: "http://apm-server:8200"
-      ELASTIC_APM_ENABLED: "true"
-      ELASTIC_APM_SECRET_TOKEN: ""
-      ELASTIC_APM_DEBUG: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://apm-server:8200"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_SERVICE_NAME: "bootcamp-django"
+      OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=bootcamp"
     networks: 
         - elk_elastic
   db:
@@ -304,7 +330,7 @@ networks:
 ```
 
 This file provides the following overrides:
-- Configure Elastic APM using environment variables to define the config
+- Configure OpenTelemetry using environment variables to define the config
 - Add Django + DB to the docker network for Elasticsearch
 - Tells docker that the definition and creation of the `elk_elastic` network happens elsewhere
 
@@ -316,21 +342,23 @@ First, let's go back to the directory for Django
 $ cd ../Django
 ```
 
-Now all we need to do to use an override file is to include the path in our `docker-compose` command.
+Now all we need to do to use an override file is to include the path in our `docker compose` command.
 
 ```bash
-$ docker-compose -f docker-compose.yml -f docker-compose.apm.yml up -d
+$ docker compose -f docker-compose.yml -f docker-compose.otel.yml up -d
 
 ...
 Recreating django_db_1 ... done
 Recreating django_web_1 ...
 ```
 
-> Note: The default name of the docker-compose override file is `docker-compose.override.yml`. If you include a file with this name in the same directory as the normal docker-compose.yml, it'll automatically be included in the up command. In this case though, we don't want it automatically included, so we will specify it directly.
+> Note: The default name of the docker compose override file is `docker-compose.override.yml`. If you include a file with this name in the same directory as the normal docker-compose.yml, it'll automatically be included in the up command. In this case though, we don't want it automatically included, so we will specify it directly.
 
-That's it! Now Django is setup to use APM for monitoring the performance of the codebase. 
+That's it! Now Django is setup to use OpenTelemetry for monitoring the performance of the codebase. 
 
-To view your APM transactions, simply head to the [APM section](http://localhost:5601/app/apm#/services/bootcamp-django/transactions?rangeFrom=now-30m&rangeTo=now&refreshInterval=0&refreshPaused=true&transactionType=request) in Kibana. If you made some requests to Django, it should look something like the following:
+> Note: The Django container starts `runserver` with `--noreload`. This keeps a single process under `opentelemetry-instrument`, which makes endpoint trace collection consistent; the auto-reloader can fork a child process that misses instrumentation.
+
+To view your OTel-backed traces, head to the [APM section](http://localhost:5601/app/apm#/services/bootcamp-django/transactions?rangeFrom=now-30m&rangeTo=now&refreshInterval=0&refreshPaused=true&transactionType=request) in Kibana. If you made some requests to Django, it should look something like the following:
 
 ![APM Overview](docs/apm-overview.png)
 ### Step 4: Use the Django Site to generate some Transactions
@@ -363,15 +391,32 @@ Try using the following endpoints and see what happens with APM:
 2. http://0.0.0.0:8000/sleep/3
 3. http://0.0.0.0:8000/error
 
+### Automated end-to-end APM assertion
+
+If you want a pass/fail check instead of visual inspection in Kibana, run:
+
+```bash
+$ ./scripts/test-apm-e2e.sh
+```
+
+This script:
+- starts ELK with `--profile monitoring`
+- starts Django with `docker-compose.otel.yml`
+- generates traffic against Django endpoints
+- queries Elasticsearch and fails unless documents for `service.name=bootcamp-django` are present within the time window
+
+You can customize the service name and wait timeout:
+
+```bash
+$ APM_SERVICE_NAME=bootcamp-django MAX_WAIT_SECONDS=240 ./scripts/test-apm-e2e.sh
+```
 
 
-## Using docker-compose override files to perform testing
+## Using docker compose override files to perform testing
 
 Consider the very simple [docker-compose.tests.yml](Django/docker-compose.tests.yml)
 
 ```yml
-version: "3.9"
-   
 services:
   web:
     entrypoint: "python manage.py test"
@@ -380,7 +425,7 @@ services:
 All this override file is doing is telling the web container that we want to run tests instead of the default entrypoint command (defined in the `Dockerfile`). This allows us to completely change what the container's function is. Instead of running the Django app, we are now just going to run tests!
 
 ```bash
-$ docker-compose -f docker-compose.yml -f docker-compose.tests.yml up --exit-code-from=web web
+$ docker compose -f docker-compose.yml -f docker-compose.tests.yml up --exit-code-from=web web
 
 ...
 web_1  | ..........
@@ -394,7 +439,7 @@ web_1  | Destroying test database for alias 'default'...
 That's all it took to run the tests! Which provides us the foundation for Continuous Integration (the CI part of CI/CD). If we hooked this test command into an automated system like Jenkins, we'd be able to deliver test results on each build. Pretty easy right? 
 
 ## Challenges
-### Challenge 1: Run the tests using a `docker-compose exec` command
+### Challenge 1: Run the tests using a `docker compose exec` command
 
 <details><summary>Answer</summary>
 <p>
@@ -402,13 +447,13 @@ That's all it took to run the tests! Which provides us the foundation for Contin
 Start Django if it's not running
 
 ```bash
-$ docker-compose up -d
+$ docker compose up -d
 ```
 
 Run the exec command
 
 ```bash
-$ docker-compose exec web python manage.py test
+$ docker compose exec web python manage.py test
 
 ...
 ..........
@@ -430,7 +475,7 @@ Destroying test database for alias 'default'...
 Stop Django if it's running
 
 ```bash
-$ docker-compose down
+$ docker compose down
 
 Stopping django_web_1 ... 
 Stopping django_db_1  ...
@@ -451,7 +496,7 @@ to
       - "8001:8000"
 ```
 
-Then run `docker-compose up -d`.
+Then run `docker compose up -d`.
 
 Once it's launched: 
 
@@ -485,7 +530,7 @@ labels:
 Then redeploy the service
 
 ```bash
-$ docker-compose up -d
+$ docker compose up -d
 
 ...
 Recreating django_db_1 ... done
@@ -509,7 +554,7 @@ Once you are done with everything, let's clean up your local containers so that 
 
 ```bash
 $ cd ../Django
-$ docker-compose down -v  # remove any created volumes
+$ docker compose down -v  # remove any created volumes
 
 ...
 Stopping django_db_1  ... done
@@ -523,7 +568,7 @@ Removing network django_default
 
 ```bash
 $ cd ../Elk
-$ docker-compose down -v  # remove any created volumes
+$ docker compose down -v  # remove any created volumes
 
 ...
 Stopping kib              ... done
@@ -541,7 +586,7 @@ Removing volume elk_fbdata
 
 ### Fun Docker Containers
 
-I run these using docker-compose at my house on a Synology NAS.
+I run these using docker compose at my house on a Synology NAS.
 
 - Run GitLab (opensource github clone): https://docs.gitlab.com/omnibus/docker/
 - Add non-HomeKit items to Apple Home: https://github.com/oznu/docker-homebridge

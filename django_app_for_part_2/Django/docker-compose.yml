@@ -1,19 +1,20 @@
-version: "3.9"
-   
 services:
   db:
-    image: postgres:16
+    image: postgres:17-alpine
     volumes:
-      - ./data/db:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
     environment:
-      - POSTGRES_DB=postgres
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready" ]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
   web:
     build: .
     labels:
@@ -21,13 +22,30 @@ services:
       co.elastic.logs/json.keys_under_root: true
       co.elastic.logs/json.add_error_key: true
       co.elastic.logs/json.message_key: message
-    volumes:
-      - .:/code
     environment:
-      ELASTIC_APM_ENABLED: "false"
-      ELASTIC_APM_SERVICE_NAME: bootcamp-django
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      OTEL_SERVICE_NAME: bootcamp-django
+      OTEL_TRACES_EXPORTER: none
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+    develop:
+      watch:
+        - action: sync
+          path: .
+          target: /code
+        - action: rebuild
+          path: requirements.txt
     ports:
       - "8000:8000"
+    secrets:
+      - postgres_password
     depends_on:
       db:
         condition: service_healthy
+
+volumes:
+  pgdata:
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt

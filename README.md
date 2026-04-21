@@ -1,4 +1,4 @@
-# 2025 Docker Workshop
+# 2026 Docker Workshop
 
 ## Introduction to Docker
 
@@ -85,7 +85,7 @@ Let's take a look at the [Docker docs](https://docs.docker.com/language/python/b
 
 ```Docker
 # What is our base image? Since we want to create a python application, we need a base image that has python. Luckily, we can continue making use of open-source images for this as well. There are many types of images that provide python, but for this example i'll choose 
-FROM python:3.12-slim-bookworm
+FROM python:3.13-slim-trixie
 
 # What directory (inside the container) should we be working from?
 WORKDIR /app
@@ -122,12 +122,12 @@ On my team, we make use of a [library]([https://python-rq.org]) called `RQ-Pytho
 
 Ok, let's get started.
 
-### Pull the Redis image
+### Pull the Valkey image
 
 All we need to do is type `docker pull REPOSITORY[:TAG]`. What does this syntax mean? Well docker images are stored in repositories, just like code is stored in git repositories. By default, all images are pulled from DockerHub. You are able to create and manage your own image repositories, but we won't go over that. The image repository is required, but the tag isn't and will be defaulted to `latest` if nothing is given for it.
 
 ```bash
-docker pull redis
+docker pull valkey/valkey:8-alpine
 ```
 
 Which should output something like: 
@@ -135,20 +135,29 @@ Which should output something like:
 Using default tag: latest
 latest: Pulling from library/redis
 Digest: sha256:7e2c6181ad5c425443b56c7c73a9cd6df24a122345847d1ea9bb86a5afc76325
-Status: Image is up to date for redis:latest
-docker.io/library/redis:latest
+Status: Image is up to date for valkey/valkey:8-alpine
+docker.io/library/valkey/valkey:8-alpine
 ```
 
-What is happening here? Well you are pulling the redis image from the default [repository](https://hub.docker.com/_/redis) on Docker Hub. 
+What is happening here? You are pulling the Valkey image from Docker Hub.
+
+> Why Valkey in 2026? Redis remains popular, but many teams now choose Valkey (an open Redis-compatible fork) for fully open governance and licensing flexibility. The command set used in this workshop is compatible.
+
+For reproducible builds, pin by digest when you move to CI:
+
+```bash
+docker buildx imagetools inspect valkey/valkey:8-alpine
+# then use: valkey/valkey@sha256:<digest>
+```
 
 If you click on one of the tags in that repo, you can see the Dockerfile that backs the image. Here's an example of what an opensource image looks like: https://github.com/redis/docker-library-redis/blob/0d682fed252b85f39d2033294eab217be02f95a1/7.4-rc/debian/Dockerfile
 
-### Inspect the Redis image
+### Inspect the Valkey image
 
 To view the image details, we just need to type `docker images [REPOSITORY[:TAG]]`. This time, the repository is not required, but we are going to use it to limit our results to the image we want. For example:
 
 ```bash
-docker images redis
+docker images valkey/valkey
 ```
 
 Which should output something like: 
@@ -166,7 +175,7 @@ In this example, we can see that this particular image was built two weeks ago a
 > Run the open-source image redis image (last arg), call it 'redis' (--name redis) and run it in detached mode (-d)
 
 ```bash
-docker run --name redis -d redis:latest
+docker run --name redis -d valkey/valkey:8-alpine
 ```
 
 This should spit out the docker image id, which is a unique identifier for the container. That's literally how easy it can be to run a Docker image.
@@ -182,7 +191,7 @@ docker ps
 This should output something like: 
 ```
 CONTAINER ID   IMAGE          COMMAND                  CREATED          STATUS          PORTS      NAMES
-16ad2cca6925   redis:latest   "docker-entrypoint.s…"   22 seconds ago   Up 21 seconds   6379/tcp   redis
+16ad2cca6925   valkey/valkey:8-alpine   "docker-entrypoint.s…"   22 seconds ago   Up 21 seconds   6379/tcp   redis
 ```
 
 There's our docker container running with Redis inside of it. The `STATUS` column tells us that the container is `Up` and has been running for 21 seconds. The `PORTS` column tells us that the container is listening on port `6379`.
@@ -310,7 +319,7 @@ Now we are going to create the container, this time with the `--rm` option which
 Once it's started, we will attempt to get the data again. Either way, we stop the container when we are done with it (which will destroy the container).
 
 ```bash
-docker run --rm --name redis -d redis:latest && docker exec -it redis redis-cli GET myname; docker stop redis;
+docker run --rm --name redis -d valkey/valkey:8-alpine && docker exec -it redis redis-cli GET myname; docker stop redis;
 ```
 
 Which should output: 
@@ -346,7 +355,7 @@ redis_data
 Run the open-source image redis image (last arg), call it 'redis' (--name redis) and run it in detached mode (-d) with volume 'redis_data'
 
 ```bash
-docker run -v redis_data:/data --name redis -d redis:latest 
+docker run -v redis_data:/data --name redis -d valkey/valkey:8-alpine 
 ```
 
 This should output the container id, which is a unique identifier for the container. For example:
@@ -419,7 +428,7 @@ redis
 ### Recreate the Redis container, using the same docker volume
 
 ```bash
-docker run -v redis_data:/data --name redis -d redis:latest
+docker run -v redis_data:/data --name redis -d valkey/valkey:8-alpine
 ```
 
 ```
@@ -443,22 +452,20 @@ This is one of the most fundamental concepts of Docker. By using volumes, you ca
 Let's create a container to utilize the code in `redis_client_app/redis_client.py`. Our image is going to look very similar to the one we viewed earlier. With [Dockerfiles](/redis_client_app/Dockerfile), it's extremely important to put the things that change _least_ at the top, as Docker will build and cache the `layers` it generates from this file. This is so that on subsequent builds, you won't need to wait for the entire command again (unless you explicitly want to run it without cache, which is possible). 
 
 ```Docker
-# Use the small python image, no need for fancy add-ons
-FROM python:3.12-slim-bookworm
-
-# Use /app as our working directory
-WORKDIR /app
-
-# Copy our requirements
+# syntax=docker/dockerfile:1
+FROM python:3.13-slim-trixie AS builder
+WORKDIR /build
 COPY requirements.txt requirements.txt
+RUN pip wheel --wheel-dir /wheels -r requirements.txt
 
-# Install our requirements
-RUN pip3 install -r requirements.txt
-
-# Copy the rest of our project
+FROM python:3.13-slim-trixie
+WORKDIR /app
+COPY requirements.txt requirements.txt
+COPY --from=builder /wheels /wheels
+RUN pip install --no-index --find-links=/wheels -r requirements.txt && rm -rf /wheels
 COPY . .
-
-# Run our app
+RUN useradd --system --uid 1001 --create-home app && chown -R app:app /app
+USER app
 ENTRYPOINT [ "python3", "redis_client.py"]
 ```
 
@@ -473,6 +480,24 @@ Build our container and tag (name) it as "bootcamp". The `redis_client_app` tell
 ```bash
 docker build -f redis_client_app/Dockerfile -t bootcamp redis_client_app
 ```
+
+Optional: build a production-style distroless runtime image for smaller attack surface:
+
+```Docker
+# Final stage example
+FROM gcr.io/distroless/python3-debian12
+WORKDIR /app
+COPY --from=builder /wheels /wheels
+COPY . .
+ENTRYPOINT ["python3", "redis_client.py"]
+```
+
+If you are on Apple Silicon, test multi-arch builds with BuildKit:
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 -t bootcamp:2026 redis_client_app
+```
+
 Let's run our code without arguments to see what it can do
 
 ### Run our image
@@ -631,8 +656,8 @@ docker network rm bootcamp_net
 
 So far it's kind of been a nightmare of cli commands. There has to be a better way right...?
 
-There is! With docker-compose, we can combine everything we've learned so far into a single file that's easier to manage.
-### docker-compose files
+There is! With docker compose, we can combine everything we've learned so far into a single file that's easier to manage.
+### docker compose files
 
 The `docker-compose.yml` file has it's own syntax, syntax verions, and a [ton of useful tools](https://docs.docker.com/compose/compose-file/compose-file-v3/) that we won't have time to go over here.
 
@@ -655,7 +680,7 @@ services:
 
     # Define redis properties
     cache:
-        image: 'redis:latest'
+        image: 'valkey/valkey:8-alpine'
         volumes: 
             - redis_storage:/data
         networks:
@@ -674,13 +699,19 @@ services:
             interval: 3s
 ```
 
-### docker-compose cli
+### docker compose cli
 
-#### docker-compose up
+#### docker compose up
 The following command will create the network, the volume, both containers (in the background), and the proper links:
 
 ```bash
-cd redis_client_app && docker-compose up -d --build
+cd redis_client_app && docker compose up -d --build
+```
+
+For live development in Compose v2.22+, run watch mode in a separate terminal:
+
+```bash
+docker compose watch
 ```
 
 ```
@@ -689,11 +720,11 @@ Starting redis_app_1   ... done
 Starting redis_cache_1 ... done
 ```
 
-#### docker-compose ps
+#### docker compose ps
 Let's check on it! Run the following command to see the status of everything:
 
 ```bash
-docker-compose ps
+docker compose ps
 ```
 
 ```
@@ -710,7 +741,7 @@ redis_cache_1   docker-entrypoint.sh redis ...   Up             6379/tcp
 Most docker-contains have some type of shell that you can use to run commands with. In this case, the command we want to run will open up a new shell instance `/bin/sh` and attach us to it so that it acts as our new shell. When we are done, we exit it with `exit`. You could replace `/bin/sh` with any valid executable in the `$PATH` environment variable. For example, listing the files in the `WORKDIR` directory of a container:
 
 ```bash
-docker-compose exec app ls -lrt
+docker compose exec app ls -lrt
 ```
 
 ```
@@ -721,11 +752,11 @@ total 16
 -rw-r--r-- 1 root root 1094 Jun 21 23:06 redis_client.py
 ```
 
-#### docker-compose exec
+#### docker compose exec
 Now let's run our commands again, this time from inside the container! The following command will attach us to the python container so that we can run the same commands as before. We read this command like so: `docker execute <service_name> <command_inside_container>`.
 
 ```bash
-docker-compose exec app /bin/sh
+docker compose exec app /bin/sh
 ```
 
 ##### Living inside a container
@@ -770,15 +801,15 @@ exit
 #### Or you can just run the app directly
 
 ```bash
-docker-compose exec app python redis_client.py
+docker compose exec app python redis_client.py
 ```
 
-#### docker-compose scale
+#### docker compose up --scale
 
 Using the scale command, we are able to easily spin up more containers of the same type. This is useful for load balancing, or for testing purposes. It's also a great way to see how your application will behave in a distributed environment. There are a lot of things to consider when scaling, but for now, let's just see how it works.
 
 ```bash
-docker-compose scale cache=2
+docker compose up -d --scale cache=2
 ```
    
 And now we can see the new container spinning up:
@@ -792,7 +823,7 @@ And now we can see the new container spinning up:
 or if you want to go crazy:
 
 ```bash
-docker-compose scale cache=10
+docker compose up -d --scale cache=10
 ```
 
 ```text
@@ -812,12 +843,12 @@ docker-compose scale cache=10
 
 Why is this useful? Well, if you have a lot of jobs to do, you can spin up a lot of workers to do them. If you have a lot of traffic, you can spin up a lot of web servers to handle it. If you have a lot of data, you can spin up a lot of databases to store it. 
 
-#### docker-compose logs
+#### docker compose logs
 
-Using the logs command of docker-compose, we can see the logs of all the containers in the docker-compose file.
+Using the logs command of docker compose, we can see the logs of all the containers in the docker compose file.
 
 ```bash
-docker-compose logs
+docker compose logs
 ```
 
 ```text
@@ -838,7 +869,7 @@ cache-6   | 1:M 26 Jun 2024 23:30:06.811 * Ready to accept connections tcp
 Just view the logs for a single service:
 
 ```bash
-docker-compose logs cache
+docker compose logs cache
 ```
 
 ```text
@@ -848,13 +879,13 @@ cache-2  | 1:C 26 Jun 2024 23:08:22.961 * oO0OoO0OoO0Oo Redis is starting oO0OoO
 ...
 ```
 
-#### docker-compose stats
+#### docker compose stats
 
 ```bash
-docker-compose stats
+docker compose stats
 ```
 
-Which will take over your console and show you the stats of the containers in the docker-compose file.
+Which will take over your console and show you the stats of the containers in the docker compose file.
 
 ```text
            Name                         CPU               Memory            PIDs
@@ -864,10 +895,10 @@ Which will take over your console and show you the stats of the containers in th
 
 Type control-c to exit the stats view.
 
-#### docker-compose top
+#### docker compose top
 
 ```bash
-docker-compose top
+docker compose top
 ```
 
 Which will show you the top processes running in each container.
@@ -888,12 +919,12 @@ UID   PID     PPID    C    STIME   TTY   TIME       CMD
 ...
 ```
 
-#### docker-compose events
+#### docker compose events
 
 To see what is happening with your containers, you can use the events command.
     
 ```bash
-docker-compose events
+docker compose events
 ```
 
 This will show the `HEALTHCHECK` in the compose file running over and over again. To exit, type control-c.
@@ -903,18 +934,18 @@ This will show the `HEALTHCHECK` in the compose file running over and over again
 Let's make sure everything still works:
 
 ```bash
-docker-compose exec app python redis_client.py check_redis
+docker compose exec app python redis_client.py check_redis
 ```
 
 This should output True.
 
-#### docker-compose down
+#### docker compose down
 To bring all the containers down, type: 
 
 Exit the container context by typing:
 
 ```bash
-docker-compose down
+docker compose down
 ```
 
 > As you can see, docker compose drastically reduces development time while allowing the same features as the CLI.
@@ -953,7 +984,7 @@ Install from this link: https://code.visualstudio.com/download
 ### Build & Run our development container
 
 ```bash
-docker-compose build
+docker compose build
 ```
 
 ```
@@ -978,13 +1009,25 @@ Oh hai
 
 How does this work? VSCode has a `.vscode/launch.json` file that you can add run configurations into. This is extremely powerful and dynamic and will allow you to run most workloads right in VSCode.
 
+## Container Security Checks with Docker Scout
+
+Before pushing an image, run a quick vulnerability check:
+
+```bash
+docker scout quickview bootcamp:2026
+docker scout cves bootcamp:2026
+docker scout recommendations bootcamp:2026
+```
+
+This gives you a simple 2026 workflow: build, scan, and then ship.
+
 ## Final Thoughts
 
 By going through this exercise, you should have a better idea of what Docker is and what kinds of things you can do with it. There is so much more to explore, here are just a few things that i've found fun while working with it:
 
 - You can run Docker inside Docker (woah).
   - Very useful for CI/CD, since the runner can be containerized but it can also create other containers.
-- Orchestrating container deployments with docker-compose using docker-swarm.
+- Orchestrating container deployments with docker compose using docker-swarm.
 - *Using PyCharm to have your default interpreter be inside of a container*
   - Allows for a clean development environment on ever build
   - Debugging features still work

@@ -32,7 +32,6 @@ ALLOWED_HOSTS = ['*']
 # Application definition
 
 INSTALLED_APPS = [
-    'elasticapm.contrib.django',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -43,8 +42,6 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    'elasticapm.contrib.django.middleware.TracingMiddleware',
-    'elasticapm.contrib.django.middleware.Catch404Middleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -79,12 +76,17 @@ WSGI_APPLICATION = 'djangobootcamp.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/3.2/ref/settings/#databases
 
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "postgres")
+if os.getenv("POSTGRES_PASSWORD_FILE"):
+    with open(os.getenv("POSTGRES_PASSWORD_FILE"), "r", encoding="utf-8") as f:
+        POSTGRES_PASSWORD = f.read().strip()
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': 'postgres',
         'USER': 'postgres',
-        'PASSWORD': 'postgres',
+        'PASSWORD': POSTGRES_PASSWORD,
         'HOST': 'db',
         'PORT': 5432,
     }
@@ -152,10 +154,6 @@ LOGGING = {
         }
     },
     'handlers': {
-        'elasticapm': {
-            'level': 'WARNING',
-            'class': 'elasticapm.contrib.django.handlers.LoggingHandler',
-        },
         'console': {
             'level': 'DEBUG',
             'class': 'logging.StreamHandler',
@@ -175,13 +173,7 @@ LOGGING = {
         },
         'djangobootcamp': {
             'level': 'WARNING',
-            'handlers': ['elasticapm'],
-            'propagate': False,
-        },
-        # Log errors from the Elastic APM module to the console (recommended)
-        'elasticapm.errors': {
-            'level': 'ERROR',
-            'handlers': ['console'],
+            'handlers': ['json'],
             'propagate': False,
         },
         'django.server': {

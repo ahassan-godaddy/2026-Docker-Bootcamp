@@ -15,4 +15,4 @@ python manage.py createsuperuser --noinput --username admin --email test@test.co
 
 # Start server
 echo "Starting server"
-python manage.py runserver 0.0.0.0:8000
+DJANGO_SETTINGS_MODULE=djangobootcamp.settings opentelemetry-instrument -- python manage.py runserver 0.0.0.0:8000 --noreload

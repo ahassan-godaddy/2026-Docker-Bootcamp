@@ -1,4 +1,7 @@
-Django>=5.1,<6.0
-psycopg2-binary>=2.9
-elastic-apm==6.21.3
+Django>=5.2,<6.0
+psycopg[binary]>=3.2
+opentelemetry-distro>=0.50b0
+opentelemetry-exporter-otlp>=1.29.0
+opentelemetry-instrumentation-django>=0.50b0
+opentelemetry-instrumentation-psycopg>=0.50b0
 JSON-log-formatter==0.5.2

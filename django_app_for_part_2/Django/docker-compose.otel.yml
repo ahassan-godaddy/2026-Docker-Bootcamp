@@ -1,0 +1,20 @@
+services:
+  web:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://apm-server:8200"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_SERVICE_NAME: "bootcamp-django"
+      OTEL_TRACES_EXPORTER: "otlp"
+      OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=bootcamp"
+      OTEL_TRACES_SAMPLER: "always_on"
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+    networks:
+      - elk_elastic
+  db:
+    networks:
+      - elk_elastic
+
+networks:
+  elk_elastic:
+    external: true
