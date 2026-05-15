@@ -10,7 +10,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DJANGO_DIR="$PROJECT_ROOT/django_app_for_part_2/Django"
 ELK_DIR="$PROJECT_ROOT/django_app_for_part_2/ELK"
 
-ELASTIC_PASSWORD_FILE="$ELK_DIR/secrets/elasticsearch_password.txt"
+ELASTIC_PASSWORD="${ELASTIC_PASSWORD:-bootcamp-elastic}"
 APM_SERVICE_NAME="${APM_SERVICE_NAME:-bootcamp-django}"
 MAX_WAIT_SECONDS="${MAX_WAIT_SECONDS:-180}"
 REQUIRED_ENDPOINTS=("/sleep/1" "/sleep/2" "/error")
@@ -32,15 +32,6 @@ require_tools() {
 }
 
 ensure_secret_files() {
-  if [ ! -f "$ELASTIC_PASSWORD_FILE" ]; then
-    if [ -f "$ELK_DIR/secrets/elasticsearch_password.example.txt" ]; then
-      cp "$ELK_DIR/secrets/elasticsearch_password.example.txt" "$ELASTIC_PASSWORD_FILE"
-      log "Created Elasticsearch password file from example"
-    else
-      fail "missing $ELASTIC_PASSWORD_FILE"
-    fi
-  fi
-
   if [ ! -f "$DJANGO_DIR/secrets/postgres_password.txt" ]; then
     if [ -f "$DJANGO_DIR/secrets/postgres_password.example.txt" ]; then
       cp "$DJANGO_DIR/secrets/postgres_password.example.txt" "$DJANGO_DIR/secrets/postgres_password.txt"
@@ -49,9 +40,6 @@ ensure_secret_files() {
       fail "missing $DJANGO_DIR/secrets/postgres_password.txt"
     fi
   fi
-
-  # Elasticsearch enforces strict permissions for ELASTIC_PASSWORD_FILE.
-  chmod 600 "$ELASTIC_PASSWORD_FILE"
   chmod 600 "$DJANGO_DIR/secrets/postgres_password.txt" || true
 }
 
@@ -74,11 +62,9 @@ wait_for_http() {
 wait_for_elasticsearch() {
   local timeout_seconds="${1:-180}"
   local elapsed=0
-  local elastic_password
-  elastic_password="$(tr -d '\r\n' < "$ELASTIC_PASSWORD_FILE")"
 
   while [ "$elapsed" -lt "$timeout_seconds" ]; do
-    if curl -sSf -u "elastic:${elastic_password}" "http://localhost:9200/_cluster/health" >/dev/null 2>&1; then
+    if curl -sSf -u "elastic:${ELASTIC_PASSWORD}" "http://localhost:9200/_cluster/health" >/dev/null 2>&1; then
       return 0
     fi
     sleep 2
@@ -92,7 +78,7 @@ start_stack() {
   log "Starting ELK (monitoring profile)"
   (
     cd "$ELK_DIR"
-    docker compose --profile monitoring up -d
+    ELASTIC_PASSWORD="$ELASTIC_PASSWORD" docker compose --profile monitoring up -d
   )
 
   log "Waiting for Elasticsearch and APM Server"
@@ -102,7 +88,6 @@ start_stack() {
   log "Starting Django + OTel override"
   (
     cd "$DJANGO_DIR"
-    docker compose up -d --build
     docker compose -f docker-compose.yml -f docker-compose.otel.yml up -d --build
   )
 
@@ -120,12 +105,10 @@ generate_traffic() {
 
 query_endpoint_trace_count() {
   local endpoint_path="$1"
-  local elastic_password
-  elastic_password="$(tr -d '\r\n' < "$ELASTIC_PASSWORD_FILE")"
 
   local query_response
   query_response="$(
-    curl -sS -u "elastic:${elastic_password}" \
+    curl -sS -u "elastic:${ELASTIC_PASSWORD}" \
       -H "Content-Type: application/json" \
       -X POST "http://localhost:9200/_search" \
       -d "{

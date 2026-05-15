@@ -4,8 +4,8 @@
 
 - [Bootcamp CI/CD & Docker pt. 2](#bootcamp-cicd--docker-pt-2)
     - [The Power of Docker](#the-power-of-docker)
-        - [docker compose refresher](#docker compose-refresher)
-    - [Advanced Docker Compose Example](#advanced-docker compose-example)
+        - [docker compose refresher](#docker-compose-refresher)
+    - [Advanced Docker Compose Example](#advanced-docker-compose-example)
         - [Step 1: Create Django Project](#step-1-create-django-project)
             - [Deploy Django Service](#deploy-django-service)
             - [Exec into Django](#exec-into-django)
@@ -21,13 +21,13 @@
                 - [Filebeat](#filebeat)
             - [Deploy the Elastic Stack](#deploy-the-elastic-stack)
                 - [Use the Elastic Stack](#use-the-elastic-stack)
-        - [Step 3: Tie Application Performance Metrics APM into Django](#step-3-tie-application-performance-metrics-apm-into-django)
+        - [Step 3: Tie OpenTelemetry OTel into Django](#step-3-tie-opentelemetry-otel-into-django)
             - [Using Override Files](#using-override-files)
         - [Step 4: Use the Django Site to generate some Transactions](#step-4-use-the-django-site-to-generate-some-transactions)
         - [Step 5: Dive into APM](#step-5-dive-into-apm)
-    - [Using docker compose override files to perform testing](#using-docker compose-override-files-to-perform-testing)
+    - [Using docker compose override files to perform testing](#using-docker-compose-override-files-to-perform-testing)
     - [Challenges](#challenges)
-        - [Challenge 1: Run the tests using a docker compose exec command](#challenge-1-run-the-tests-using-a-docker compose-exec-command)
+        - [Challenge 1: Run the tests using a docker compose exec command](#challenge-1-run-the-tests-using-a-docker-compose-exec-command)
         - [Challenge 2: Run the Django site on a different local port 8001](#challenge-2-run-the-django-site-on-a-different-local-port-8001)
         - [Challenge 3: Send the Database Logs to Elasticsearch](#challenge-3-send-the-database-logs-to-elasticsearch)
     - [Wrapping up](#wrapping-up)
@@ -259,8 +259,6 @@ Filebeat is a log shipper. The purpose of it is to feed data into Elasticsearch 
 
 ```bash
 $ cd ../ELK
-$ cp secrets/elasticsearch_password.example.txt secrets/elasticsearch_password.txt
-$ chmod 600 secrets/elasticsearch_password.txt
 $ docker compose --profile monitoring --profile ui up -d  # This might take a while...
 
 ...

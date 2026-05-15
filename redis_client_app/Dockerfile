@@ -16,4 +16,4 @@ COPY . .
 RUN useradd --system --uid 1001 --create-home app && chown -R app:app /app
 USER app
 
-ENTRYPOINT [ "python3", "redis_client.py"]
+ENTRYPOINT [ "python3", "cache_client.py"]

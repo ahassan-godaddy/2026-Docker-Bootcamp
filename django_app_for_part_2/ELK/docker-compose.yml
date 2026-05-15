@@ -9,19 +9,17 @@ services:
       ES_JAVA_OPTS: "-Xms512m -Xmx512m"
       xpack.security.enabled: true
       xpack.security.http.ssl.enabled: false
-      ELASTIC_PASSWORD_FILE: /run/secrets/elasticsearch_password
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-bootcamp-elastic}
     volumes:
       - esdata:/usr/share/elasticsearch/data/
     ports:
       - "9200:9200"
       - "9300:9300"
-    secrets:
-      - elasticsearch_password
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "curl --silent --fail -u elastic:$(cat /run/secrets/elasticsearch_password) localhost:9200/_cluster/health || exit 1",
+          "curl --silent --fail -u elastic:${ELASTIC_PASSWORD:-bootcamp-elastic} localhost:9200/_cluster/health || exit 1",
         ]
       interval: 10s
       timeout: 10s
@@ -36,6 +34,8 @@ services:
     user: root
     image: docker.elastic.co/beats/filebeat:${STACK_VERSION:-9.3.3}
     profiles: ["monitoring"]
+    environment:
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-bootcamp-elastic}
     volumes:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - ./configs/filebeat.yml:/usr/share/filebeat/filebeat.yml
@@ -43,7 +43,7 @@ services:
       - fbdata:/usr/share/filebeat/data/
     networks:
       - elastic
-    command: filebeat -e -strict.perms=false
+    command: filebeat -e --strict.perms=false
     restart: on-failure
     depends_on:
       elasticsearch:
@@ -86,7 +86,7 @@ services:
           -E apm-server.host=0.0.0.0:8200 \
           -E output.elasticsearch.hosts='["http://elasticsearch:9200"]' \
           -E output.elasticsearch.username=elastic \
-          -E output.elasticsearch.password="$(cat /run/secrets/elasticsearch_password)"
+          -E output.elasticsearch.password="${ELASTIC_PASSWORD:-bootcamp-elastic}"
     ports:
       - "127.0.0.1:${APM_SERVER_PORT:-8200}:8200"
       - "127.0.0.1:${APM_SERVER_MONITOR_PORT:-6060}:6060"
@@ -105,8 +105,6 @@ services:
     depends_on:
       elasticsearch:
         condition: service_healthy
-    secrets:
-      - elasticsearch_password
     healthcheck:
       test: [ "CMD", "curl", "--silent", "--fail", "http://apm-server:8200/" ]
       retries: 10
@@ -123,7 +121,3 @@ volumes:
     driver: local
   fbdata:
     driver: local
-
-secrets:
-  elasticsearch_password:
-    file: ./secrets/elasticsearch_password.txt

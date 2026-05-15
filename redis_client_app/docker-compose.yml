@@ -1,34 +1,34 @@
 
 # Create the network so that our containers can talk to eachother
 networks:
-    redis:
-      name: redis_net
+    bootcamp:
+      name: bootcamp_net
       driver: bridge
 
-# Create the storage volume for redis
-volumes: 
-    redis_storage:
-        name: redis_storage
+# Create the storage volume for our cache
+volumes:
+    cache_data:
+        name: cache_data
 
 # Define our containers
 services:
 
-    # Define redis properties
+    # Define cache properties
     cache:
         image: 'valkey/valkey:8-alpine'
-        volumes: 
-            - redis_storage:/data
+        volumes:
+            - cache_data:/data
         networks:
-            - redis
+            - bootcamp
 
     # Define python app properties, have it build our image
     app:
-        build: 
+        build:
             context: .
-        networks: 
-            - redis
-        environment: 
-            REDIS_HOST: cache
+        networks:
+            - bootcamp
+        environment:
+            CACHE_HOST: ${CACHE_HOST:-cache}
         entrypoint: "/bin/sh"
         tty: true
         develop:
@@ -39,5 +39,5 @@ services:
                 - action: rebuild
                   path: requirements.txt
         healthcheck:
-            test: ["CMD", "python", "redis_client.py", "check_redis"] 
+            test: ["CMD", "python", "cache_client.py", "check_cache"]
             interval: 3s

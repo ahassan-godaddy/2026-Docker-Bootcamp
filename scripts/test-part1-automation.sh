@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-REDIS_DIR="$PROJECT_ROOT/redis_client_app"
+APP_DIR="$PROJECT_ROOT/redis_client_app"
 
 VALKEY_CONTAINER_NAME="valkey-bootcamp-test"
 CUSTOM_IMAGE_NAME="bootcamp-2026-test"
@@ -20,8 +20,8 @@ cleanup() {
   docker rm -f "$VALKEY_CONTAINER_NAME" >/dev/null 2>&1 || true
   docker image rm "$CUSTOM_IMAGE_NAME" >/dev/null 2>&1 || true
   docker network rm "$NETWORK_NAME" >/dev/null 2>&1 || true
-  if [ -d "$REDIS_DIR" ]; then
-    (cd "$REDIS_DIR" && docker compose down >/dev/null 2>&1 || true)
+  if [ -d "$APP_DIR" ]; then
+    (cd "$APP_DIR" && docker compose down >/dev/null 2>&1 || true)
   fi
 }
 
@@ -45,18 +45,18 @@ run_tests() {
   docker exec "$VALKEY_CONTAINER_NAME" redis-cli SET myname Andrew | grep -q "OK"
   docker exec "$VALKEY_CONTAINER_NAME" redis-cli GET myname | grep -Eq '"Andrew"|Andrew'
 
-  log "Building redis client image"
-  docker build -f "$REDIS_DIR/Dockerfile" -t "$CUSTOM_IMAGE_NAME" "$REDIS_DIR" >/dev/null
+  log "Building cache client image"
+  docker build -f "$APP_DIR/Dockerfile" -t "$CUSTOM_IMAGE_NAME" "$APP_DIR" >/dev/null
   docker run --rm "$CUSTOM_IMAGE_NAME" >/dev/null
 
   log "Connecting app container to Valkey"
   docker network create "$NETWORK_NAME" >/dev/null
-  docker network connect "$NETWORK_NAME" "$VALKEY_CONTAINER_NAME" --alias redis >/dev/null
-  docker run --rm --net "$NETWORK_NAME" "$CUSTOM_IMAGE_NAME" check_redis | grep -q "True"
+  docker network connect "$NETWORK_NAME" "$VALKEY_CONTAINER_NAME" --alias cache >/dev/null
+  docker run --rm --net "$NETWORK_NAME" "$CUSTOM_IMAGE_NAME" check_cache | grep -q "True"
 
   log "Compose up + health"
   (
-    cd "$REDIS_DIR"
+    cd "$APP_DIR"
     docker compose up -d --build >/dev/null
     sleep 8
     docker compose ps | grep -Eq "app|cache"
@@ -64,7 +64,7 @@ run_tests() {
 
   log "Compose watch smoke check"
   (
-    cd "$REDIS_DIR"
+    cd "$APP_DIR"
     timeout 8 docker compose watch >/dev/null 2>&1 || true
   )
 
