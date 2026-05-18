@@ -107,13 +107,13 @@ CMD [ "python3", "-m" , "flask", "run", "--host=0.0.0.0"]
 
 Each image is different in terms of how you configure the specifics for the application running inside. What's common though, is _how_ you configure the containers. Most images are configured using environment variables and/or by mounting a local Docker volume with configuration files present. 
 
-Let's look at Valkey, a popular open-source key-value store and caching solution.
+Let's look at Valkey, as it's a very popular and useful key-value store and caching solution.
 
 ### What is Valkey?
 
-Valkey is an in-memory key-value data store used as a database, cache, streaming engine, and message broker. It's a Linux Foundation fork of Redis (started in 2024 after Redis Inc. moved to a non-OSI license) that stays BSD-licensed and is a drop-in replacement — same wire protocol, same `redis-cli`, same Python client.
+Valkey is an in-memory key-value data store that you can use as a database, a cache, a streaming engine, or a message broker. If you've heard of Redis before, Valkey is going to look pretty familiar - it's actually a Linux Foundation fork of Redis that started in 2024 (after Redis Inc. switched to a non-OSI license). The good news is that Valkey stays BSD-licensed and it's a drop-in replacement, so the same wire protocol, the same `redis-cli`, and the same Python client all work.
 
-On my team, we use a library called [`RQ-Python`](https://python-rq.org) that builds a queuing system for Python jobs on top of a Redis-compatible store like Valkey. We create thousands of jobs each night and have hundreds of worker containers that perform the jobs.
+On my team, we make use of a [library](https://python-rq.org) called `RQ-Python` that builds a queuing system for Python jobs on top of a Redis-compatible store like Valkey. We create thousands of jobs each night and have hundreds of worker containers that perform the jobs.
 
 Ok, let's get started.
 
@@ -136,12 +136,7 @@ docker.io/library/valkey/valkey:8-alpine
 
 What is happening here? You are pulling the Valkey image from Docker Hub.
 
-For reproducible builds, pin by digest when you move to CI:
-
-```bash
-docker buildx imagetools inspect valkey/valkey:8-alpine
-# then use: valkey/valkey@sha256:<digest>
-```
+> If you ever need really reproducible builds (like in CI), it's a good idea to pin by digest instead of tag. You can grab the digest with `docker buildx imagetools inspect valkey/valkey:8-alpine` and then reference it as `valkey/valkey@sha256:<digest>`.
 
 If you click on one of the tags in that repo, you can see the Dockerfile that backs the image. Here's an example of what an opensource image looks like: https://github.com/redis/docker-library-redis/blob/0d682fed252b85f39d2033294eab217be02f95a1/7.4-rc/debian/Dockerfile
 
@@ -173,9 +168,9 @@ docker run --name cache -d valkey/valkey:8-alpine
 
 This should spit out the docker image id, which is a unique identifier for the container. That's literally how easy it can be to run a Docker image.
 
-### Expose the cache to your host (`-p`)
+### Expose the cache to your host
 
-By default, the container listens on port 6379 — but only inside Docker's internal network. Your laptop can't reach it. To open a path from your host into the container, use `-p HOST_IP:HOST_PORT:CONTAINER_PORT`. Bind to loopback (`127.0.0.1`) so the port is reachable from your machine but not from the wider network:
+So our cache is running, but we can't actually connect to it from our laptop. The container is listening on port 6379, but only inside Docker's internal network. To talk to it from our host, we need to publish the port using `-p`. Let's stop our existing container and try again:
 
 ```bash
 docker rm -f cache
@@ -190,7 +185,9 @@ NAMES     PORTS
 cache     127.0.0.1:6379->6379/tcp
 ```
 
-Now your host can talk to Valkey on `localhost:6379`. We can prove it by running another disposable container that connects through your host's network bridge:
+The `-p HOST_IP:HOST_PORT:CONTAINER_PORT` syntax tells Docker to forward traffic from `127.0.0.1:6379` on our host into the container's port 6379. We're using `127.0.0.1` (loopback) so the port is reachable from our own machine but not from anyone else on the network.
+
+Yay! Now our host can talk to Valkey on `localhost:6379`. We can prove it by running another disposable container that connects through the host's network:
 
 ```bash
 docker run --rm valkey/valkey:8-alpine redis-cli -h host.docker.internal ping
@@ -200,7 +197,7 @@ docker run --rm valkey/valkey:8-alpine redis-cli -h host.docker.internal ping
 PONG
 ```
 
-> **When to expose more broadly:** the shorter `-p 6379:6379` form binds to `0.0.0.0` and exposes the port on every interface — useful when another machine on your LAN actually needs to connect, but easy to leak on coffeeshop wifi. Default to loopback and broaden deliberately.
+> If you skip the IP and just write `-p 6379:6379`, Docker binds to `0.0.0.0` and exposes the port on every interface. That's what you want when another machine on your LAN actually needs to connect, but it's easy to forget about and leak on coffeeshop wifi. I'd recommend defaulting to loopback and only broadening when you need to.
 
 ### View container in container list
 
@@ -352,13 +349,13 @@ Which should output:
 cache
 ```
 
-## Telling Docker how to behave (resources & restart)
+## Telling Docker how to behave
 
-So far we've trusted Docker's defaults. That's fine on a laptop where one runaway container at most ruins your afternoon. In production, you want explicit limits and recovery rules. Let's look at the three flags that bridge "works on my laptop" to "runs anywhere": `--memory`, `--cpus`, and `--restart`.
+So far we've been trusting Docker's defaults for everything, which is fine on a laptop. But what happens if our container goes nuts and tries to eat all our memory? Or what if it crashes and we want it to come back automatically? Let's look at a couple of `docker run` flags that come in handy for these situations.
 
-### Memory and CPU caps (`--memory`, `--cpus`)
+### Capping memory and CPU
 
-Without limits, a container can consume every byte of RAM and every CPU cycle on the host. That's how one misbehaving service takes down everything else on the box. Cap it:
+Without limits, a container can use every byte of RAM and every CPU cycle on the host. That's how one misbehaving service takes down everything else running on the same box. Let's tell Docker to cap our cache at 64 MiB and half a CPU:
 
 ```bash
 docker rm -f cache
@@ -371,11 +368,11 @@ CONTAINER ID   NAME      CPU %     MEM USAGE / LIMIT   MEM %     NET I/O        
 61f1e97c6d75   cache     0.35%     12.72MiB / 64MiB    19.88%    1.17kB / 126B   0B / 0B     5
 ```
 
-The `MEM USAGE / LIMIT` column shows our 64 MiB ceiling, and `--cpus 0.5` means at most half a CPU core's worth of work. If the container tries to allocate past the memory limit, the Linux OOM killer terminates the process inside — Docker's cgroups enforce this at the kernel level.
+There it is in the `MEM USAGE / LIMIT` column - our 64 MiB ceiling. If the container ever tries to allocate past that limit, the Linux OOM killer terminates the process inside. Docker's just leaning on the kernel's cgroups to enforce all this for us.
 
-### Bring it back when it falls (`--restart`)
+### Bringing the container back when it falls over
 
-What if your process crashes? By default, the container exits and stays dead. The `--restart` flag tells Docker to bring it back automatically:
+What if our process crashes? By default, the container just exits and stays dead. We have to manually start it again. The `--restart` flag tells Docker to bring it back for us:
 
 ```bash
 docker rm -f cache
@@ -394,16 +391,18 @@ cache     Up 2 seconds
 RestartCount=1
 ```
 
-The container died and Docker brought it back. `RestartCount=1` is your proof. The four restart policies:
+The container died and Docker brought it back! `RestartCount=1` is the proof. There are four restart policies you can use:
 
-- `no` — never restart (default).
-- `on-failure[:N]` — restart only on non-zero exit, optionally bounded to N retries.
-- `always` — restart no matter what, including when the Docker daemon starts.
-- `unless-stopped` — like `always`, but if you ran `docker stop cache` yourself, it stays stopped across daemon restarts. **This is usually the one you want.**
+- `no` - never restart (this is the default).
+- `on-failure[:N]` - only restart if the process exits with a non-zero code, optionally up to N times.
+- `always` - restart no matter what, including when the Docker daemon itself restarts.
+- `unless-stopped` - like `always`, but if you ran `docker stop cache` yourself, it stays stopped. This is usually the one you want.
 
-> **Heads up:** `docker kill` is treated as user intent in Docker Desktop and does *not* trigger a restart. To test the policy, simulate a real crash from inside the container (like the `SHUTDOWN NOSAVE` above).
+> Heads up: if you're using Docker Desktop, `docker kill cache` won't actually trigger a restart - it's treated as user intent. To test the policy you'll need to simulate a real crash from inside the container, like the `SHUTDOWN NOSAVE` above.
 
-> **Coming up:** the third runtime flag — `-e` for injecting environment variables — needs a custom image to demonstrate well, so we'll cover it once we've built one in the next chapter.
+We'll see one more useful runtime flag - `-e` for setting environment variables - in a bit, after we've built our own image.
+
+Let's clean up before moving on:
 
 ```bash
 docker rm -f cache
@@ -558,9 +557,9 @@ Build our container and tag (name) it as "bootcamp". The trailing `redis_client_
 docker build -f redis_client_app/Dockerfile -t bootcamp redis_client_app
 ```
 
-### Build it again — meet the layer cache
+### Build it again, and watch the layer cache work
 
-Run the exact same `docker build` again. It should finish in under a second:
+Now run the exact same `docker build` command a second time:
 
 ```bash
 docker build -f redis_client_app/Dockerfile -t bootcamp redis_client_app
@@ -578,7 +577,9 @@ docker build -f redis_client_app/Dockerfile -t bootcamp redis_client_app
 ...
 ```
 
-Every step says `CACHED`. Docker fingerprints the inputs to each `Dockerfile` instruction and reuses the resulting layer if nothing changed. Now edit a source file and rebuild:
+Wait, what just happened? It finished in under a second and every step says `CACHED`! Docker is fingerprinting the inputs to each Dockerfile instruction and reusing the layer it already built if nothing changed. Pretty cool, right?
+
+Now let's edit a source file and rebuild:
 
 ```bash
 # pretend you fixed a typo in cache_client.py
@@ -597,9 +598,9 @@ docker build -f redis_client_app/Dockerfile -t bootcamp redis_client_app
 #11 DONE 0.1s
 ```
 
-The expensive dependency layers are still `CACHED`, but `COPY . .` and everything below it re-ran. That's why we copy `requirements.txt` and install dependencies *before* `COPY . .` — so editing your code doesn't reinstall the world.
+The expensive dependency layers are still `CACHED`, but `COPY . .` and everything below it re-ran. This is why we copy `requirements.txt` and install our dependencies _before_ we `COPY . .`. If we did it the other way around, every code change would invalidate the dependency layer and Docker would reinstall everything from scratch.
 
-Now bust the dependency cache by touching `requirements.txt`:
+To prove that, let's actually bust the dependency cache by touching `requirements.txt`:
 
 ```bash
 echo "" >> redis_client_app/requirements.txt
@@ -616,11 +617,11 @@ docker build -f redis_client_app/Dockerfile -t bootcamp redis_client_app
 #12 DONE 6.1s
 ```
 
-Now the wheel build runs from scratch — that's the multi-second cost we usually skip. **The order of `Dockerfile` instructions is your cache hit-rate.** Put what changes least at the top.
+And there it is - the wheel build runs from scratch and we're back to multi-second builds. So the order of instructions in your Dockerfile really matters. Put the things that change least at the top, and the things that change most at the bottom.
 
-> **Pro tip:** `--no-cache` forces a clean rebuild. Useful when you suspect cached layers are masking a bug, but slow — only reach for it deliberately.
+> If you ever suspect that a cached layer is masking a bug, you can force a clean rebuild with `docker build --no-cache ...`. It's slow, so only reach for it when you really need to.
 
-Before moving on, revert the demo edits so your working tree is clean:
+Before moving on, let's revert the demo edits so our working tree is clean again:
 
 ```bash
 # Drop the trailing comment we appended and the blank line in requirements.txt
@@ -628,9 +629,9 @@ sed -i.bak -e '${/^# tweak$/d;}' redis_client_app/cache_client.py && rm redis_cl
 sed -i.bak -e '${/^$/d;}' redis_client_app/requirements.txt && rm redis_client_app/requirements.txt.bak
 ```
 
-### Send less to the build daemon (`.dockerignore`)
+### Use a `.dockerignore` to send less to the build daemon
 
-When you run `docker build`, Docker first packages up the *build context* — the entire directory you pointed at — and ships it to the build engine. Look at what gets shipped:
+When we run `docker build`, the first thing Docker does is package up the entire directory we pointed at - this is called the _build context_ - and send it over to the build engine. Let's see how big our context actually is:
 
 ```bash
 du -sh redis_client_app
@@ -640,9 +641,9 @@ du -sh redis_client_app
 20K	redis_client_app
 ```
 
-20 KB is fine. But if you had a `.git` folder, a `.venv` with hundreds of MB of installed packages, or local test data, all of it would be sent on every single build, even if your `Dockerfile` doesn't `COPY` it. Worse, files like `.env` with secrets could leak into your image if you ever wrote `COPY . .`.
+20 KB is no big deal. But imagine if we had a `.git` folder in there, or a `.venv` with hundreds of MB of installed packages, or some local test data. All of it would be packaged up and sent on every single build, even if our Dockerfile never actually `COPY`s it. Worse, if we ever wrote `COPY . .`, files like `.env` with secrets could end up baked into our image. Yikes.
 
-Solution: a `.dockerignore` file alongside your `Dockerfile`. Same syntax as `.gitignore`. Ours:
+The fix is a file called `.dockerignore` that lives next to our Dockerfile. It uses the same syntax as `.gitignore`:
 
 ```bash
 cat redis_client_app/.dockerignore
@@ -658,15 +659,15 @@ venv/
 tests/
 ```
 
-Anything matching these patterns is skipped when building the context. Treat `.dockerignore` as a defensive habit — you almost never want `.git`, virtualenvs, or local credentials inside your build context.
+Anything that matches these patterns gets skipped when Docker builds the context. Treat `.dockerignore` as a habit you always have - you almost never want your `.git` folder, your virtualenvs, or any local credentials sitting inside your build context.
 
-### Why two `FROM`s? Multi-stage builds
+### Why does our Dockerfile have two `FROM` lines?
 
-Look back at the Dockerfile. There are *two* `FROM python:3.13-slim-trixie` lines: the first is named `AS builder`, the second is the final image. That's a **multi-stage build** — and it's the reason your image stays small.
+If you look back at the Dockerfile from earlier, you might have noticed that there are _two_ `FROM python:3.13-slim-trixie` lines. The first one is named `AS builder`, and the second is the actual final image. This is called a **multi-stage build**, and it's a really powerful pattern for keeping your images small.
 
-The `builder` stage installs `pip`, downloads source distributions, and compiles wheels. That stage produces a `/wheels` directory. The final stage starts fresh from the slim base and copies just `/wheels` over with `COPY --from=builder`. The build toolchain — pip's caches, compiled C bindings' source files, intermediate downloads — stays in the builder stage and is **discarded**. Only the final stage becomes your image.
+Here's what's happening: the `builder` stage installs `pip`, downloads our dependencies, and compiles them into wheel files. That stage produces a `/wheels` directory. Then the final stage starts fresh from the same slim base and only copies the `/wheels` directory over with `COPY --from=builder`. All the toolchain stuff that pip needed - caches, compiled C bindings' source files, intermediate downloads - stays trapped inside the builder stage and gets discarded. Only the final stage becomes our image.
 
-Compare sizes:
+Let's compare image sizes to see the impact:
 
 ```bash
 docker images bootcamp
@@ -681,24 +682,18 @@ REPOSITORY   TAG                SIZE
 python       3.13-slim-trixie   143MB
 ```
 
-Our app image is only ~20 MB heavier than the bare Python base. A naive single-stage `FROM python:3.13 + RUN pip install` build typically lands at 1+ GB because the full Python image plus pip's caches stick around. Multi-stage is how you ship lean images without rewriting in Go.
+Our app image is only about 20 MB heavier than the bare Python base. Without multi-stage builds, a naive `FROM python:3.13` + `RUN pip install` setup would easily land at 1+ GB because the full Python image plus all of pip's caches and toolchain would stick around. Multi-stage is how we ship lean images without having to rewrite our app in Go.
 
-Optional: build a production-style distroless runtime image for smaller attack surface:
+> If you want to take this even further, you can swap the final stage for a distroless image to shrink the attack surface even more. Something like:
+> ```Docker
+> FROM gcr.io/distroless/python3-debian12
+> WORKDIR /app
+> COPY --from=builder /wheels /wheels
+> COPY . .
+> ENTRYPOINT ["python3", "cache_client.py"]
+> ```
 
-```Docker
-# Final stage example
-FROM gcr.io/distroless/python3-debian12
-WORKDIR /app
-COPY --from=builder /wheels /wheels
-COPY . .
-ENTRYPOINT ["python3", "cache_client.py"]
-```
-
-If you are on Apple Silicon, test multi-arch builds with BuildKit:
-
-```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t bootcamp:2026 redis_client_app
-```
+> Also, if you're on Apple Silicon and you want your image to also work on regular x86 servers, you can use BuildKit to build for multiple architectures at once: `docker buildx build --platform linux/amd64,linux/arm64 -t bootcamp:2026 redis_client_app`.
 
 Let's run our code without arguments to see what it can do
 
@@ -745,9 +740,9 @@ redis.exceptions.ConnectionError: Error -2 connecting to cache:6379. Name or ser
 
 > Doh! What's going on? Well remember how everything is isolated, this is actually a good thing. You need to explicitly tell docker that these containers can communicate with eachother. To do this, we need to create a Docker Network.
 
-#### Override config via `-e` (the runtime flag we deferred)
+#### Quick sidebar - the `-e` flag we mentioned earlier
 
-Before we wire up the network, look closer at that error: it says `connecting to cache:6379`. Where did `cache` come from? It's the default in the Python code — `os.environ.get("CACHE_HOST", "cache")`. Apps shouldn't bake configuration into their image; they read it from environment variables, and `-e KEY=VALUE` is how you inject one at run time:
+Before we wire up the network, take another look at the error message above. It says `connecting to cache:6379`. Where did `cache` come from? It's the default in our Python code: `os.environ.get("CACHE_HOST", "cache")`. We don't want to bake configuration like hostnames into our image - we want to be able to inject it at runtime. That's exactly what the `-e` flag is for:
 
 ```bash
 docker run --rm -e CACHE_HOST=somehost.invalid bootcamp check_cache 2>&1 | tail -3
@@ -759,7 +754,7 @@ docker run --rm -e CACHE_HOST=somehost.invalid bootcamp check_cache 2>&1 | tail 
 redis.exceptions.ConnectionError: Error -2 connecting to somehost.invalid:6379. Name or service not known.
 ```
 
-The error now references `somehost.invalid` — proof that our injected value won. This pattern is how one image works in dev, staging, and prod: you change the env, the image stays the same. Pass `-e` multiple times for multiple variables, or `--env-file path/to/.env` to load a whole file at once.
+Now the error references `somehost.invalid` instead of `cache`! Our injected value won. This is how one image can work in dev, staging, and prod - the env vars change, but the image stays the same. You can pass `-e` multiple times for multiple variables, or use `--env-file path/to/.env` to load a whole file at once.
 
 ### Connect Docker Containers
 
@@ -920,15 +915,15 @@ services:
 
 ### Configuring with environment variables and `.env` files
 
-Notice the `${CACHE_HOST:-cache}` in the `environment:` block above. That's compose's variable substitution syntax: read the value from a variable named `CACHE_HOST`, or fall back to the literal string `cache` if it's not set. You'll see this pattern everywhere in real compose files — it's how teams keep one compose file that works in dev, CI, and production.
+Did you notice the `${CACHE_HOST:-cache}` in the `environment:` block above? That's compose's variable substitution syntax: it reads the value from a variable named `CACHE_HOST`, or falls back to the literal string `cache` if it's not set. You'll see this pattern all over the place in real-world compose files - it's how teams keep one compose file working across dev, CI, and production.
 
-Compose looks for variables in three places, in this order of priority:
+Compose actually looks in a few different places for the value of a variable. In order of priority:
 
-1. **Your shell environment** — `CACHE_HOST=somehost docker compose up` overrides everything.
-2. **`--env-file path/to/file`** — explicit file passed on the command line.
-3. **A `.env` file** in the same directory as `docker-compose.yml` — auto-loaded if it exists.
+1. The shell environment - `CACHE_HOST=somehost docker compose up` will override anything else.
+2. A `--env-file path/to/file` passed explicitly on the command line.
+3. A `.env` file sitting in the same directory as `docker-compose.yml` - this gets auto-loaded.
 
-You can preview exactly what compose will use by running `docker compose config`. It expands all variables and prints the fully-resolved YAML:
+If you're not sure what compose will end up using, you can run `docker compose config` to preview it. This expands all the variables and prints the fully-resolved YAML:
 
 ```bash
 cd redis_client_app && docker compose config
@@ -942,7 +937,7 @@ services:
     ...
 ```
 
-The default kicked in because no `CACHE_HOST` was set anywhere. Override from the shell:
+The default kicked in because we hadn't set `CACHE_HOST` anywhere. Let's override it from the shell:
 
 ```bash
 CACHE_HOST=somehost.invalid docker compose config | grep -A1 environment
@@ -953,7 +948,7 @@ CACHE_HOST=somehost.invalid docker compose config | grep -A1 environment
       CACHE_HOST: somehost.invalid
 ```
 
-Or load from a file. Create `/tmp/bootcamp.env` with `CACHE_HOST=valkey` inside, then:
+Or we can load from a file. Create `/tmp/bootcamp.env` with `CACHE_HOST=valkey` inside, then:
 
 ```bash
 docker compose --env-file /tmp/bootcamp.env config | grep -A1 environment
@@ -964,7 +959,7 @@ docker compose --env-file /tmp/bootcamp.env config | grep -A1 environment
       CACHE_HOST: valkey
 ```
 
-> **Practical note:** `.env` is for *non-secret* configuration like hostnames, ports, log levels. For real secrets (passwords, API keys), use Docker secrets — we'll show that pattern in Part 2.
+> Quick note: `.env` is great for non-secret config like hostnames, ports, and log levels. For actual secrets like passwords and API keys, you should use Docker secrets instead. We'll see that pattern in Part 2.
 
 ### docker compose cli
 
@@ -1273,9 +1268,9 @@ Oh hai
 
 How does this work? VSCode has a `.vscode/launch.json` file that you can add run configurations into. This is extremely powerful and dynamic and will allow you to run most workloads right in VSCode.
 
-## Container Security Checks with Docker Scout
+## Scanning images with Docker Scout
 
-Before pushing an image, run a quick vulnerability check:
+Before we push our image anywhere, it's worth running a quick vulnerability check on it. Docker has a built-in tool called Scout that does exactly this:
 
 ```bash
 docker scout quickview bootcamp:2026
@@ -1283,7 +1278,7 @@ docker scout cves bootcamp:2026
 docker scout recommendations bootcamp:2026
 ```
 
-This gives you a simple 2026 workflow: build, scan, and then ship.
+`quickview` gives you a high-level summary, `cves` lists every known CVE in the image and its dependencies, and `recommendations` suggests things you can change (like newer base images) to clean up the issues. Pretty handy as a last step in your workflow before shipping.
 
 ## Final Thoughts
 

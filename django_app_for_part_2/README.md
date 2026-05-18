@@ -109,12 +109,14 @@ volumes:
   pgdata:
 ```
 
-Create the secret file before startup (example value shown):
+Before we can start anything up, we need to create our Postgres password file. There's an example file checked in to copy from:
 
 ```bash
 $ cp secrets/postgres_password.example.txt secrets/postgres_password.txt
 $ chmod 600 secrets/postgres_password.txt
 ```
+
+Postgres reads this file at startup (notice the `POSTGRES_PASSWORD_FILE` env var pointing to it) and uses its contents as the password. This is way safer than putting the password directly in our compose file - we'd never want to commit a real password to git!
 
 The first service created is the Postgres database. This allows our Django site to store and maintain it's application state. In this example, we simply use a local directory (via `volumes`) for its database storage, and you'll see that created automatically for you by compose. We also pass through some environment variables which represent how we connect to the postgress database from Django. We have added a healthcheck for this service so that our UI doesn't start up before it's database is ready.
 
@@ -132,11 +134,13 @@ Starting django_db_1 ... done
 Starting django_web_1 ... done
 ```
 
-For live reload in Compose v2.22+, run this in another terminal:
+If you want live reload while you're editing files (this is super nice for development), open up another terminal and run:
 
 ```bash
 $ docker compose watch
 ```
+
+Compose will sync any code changes you make straight into the running container, no rebuild required.
 
 Congrats! Your website should now be running at http://0.0.0.0:8000. The admin endpoint is running at: http://0.0.0.0:8000/admin/. The credentials for the admin endpoint are:
 
@@ -257,9 +261,11 @@ Elastic APM is a service that allows you to instrument and monitor the performan
 Filebeat is a log shipper. The purpose of it is to feed data into Elasticsearch from various sources. In this example, it's included to ship your local Docker logs into Elasticsearch.
 #### Deploy the Elastic Stack
 
+The ELK compose file uses Docker Compose [profiles](https://docs.docker.com/compose/profiles/) to let you pick which services to start. We want the `monitoring` profile (Filebeat + APM Server) and the `ui` profile (Kibana). Heads up: this might take a minute or two the first time:
+
 ```bash
 $ cd ../ELK
-$ docker compose --profile monitoring --profile ui up -d  # This might take a while...
+$ docker compose --profile monitoring --profile ui up -d
 
 ...
 Creating es ... done
@@ -268,7 +274,7 @@ Creating elk_apm-server_1 ... done
 Creating kib              ... done
 ```
 
-After running that command, you will have a multitude of services avaiable to you. You can always check them with `docker compose ps`.
+After running that command, you will have a multitude of services available to you. You can always check them with `docker compose ps`.
 
 
 ```bash
@@ -354,7 +360,7 @@ Recreating django_web_1 ...
 
 That's it! Now Django is setup to use OpenTelemetry for monitoring the performance of the codebase. 
 
-> Note: The Django container starts `runserver` with `--noreload`. This keeps a single process under `opentelemetry-instrument`, which makes endpoint trace collection consistent; the auto-reloader can fork a child process that misses instrumentation.
+> One thing to be aware of: the Django container starts `runserver` with `--noreload`. This keeps everything in a single process under `opentelemetry-instrument`, which makes our trace collection consistent. If we left the auto-reloader on, it can fork off a child process that misses the instrumentation, which means missing traces.
 
 To view your OTel-backed traces, head to the [APM section](http://localhost:5601/app/apm#/services/bootcamp-django/transactions?rangeFrom=now-30m&rangeTo=now&refreshInterval=0&refreshPaused=true&transactionType=request) in Kibana. If you made some requests to Django, it should look something like the following:
 
@@ -389,21 +395,21 @@ Try using the following endpoints and see what happens with APM:
 2. http://0.0.0.0:8000/sleep/3
 3. http://0.0.0.0:8000/error
 
-### Automated end-to-end APM assertion
+### A bonus: automated end-to-end testing
 
-If you want a pass/fail check instead of visual inspection in Kibana, run:
+Visually checking Kibana is fine, but if we want a pass/fail signal we can hook into CI, we can run an end-to-end test instead. There's a script in the repo that does the whole thing for us:
 
 ```bash
 $ ./scripts/test-apm-e2e.sh
 ```
 
-This script:
+Here's what it's doing under the hood:
 - starts ELK with `--profile monitoring`
-- starts Django with `docker-compose.otel.yml`
-- generates traffic against Django endpoints
-- queries Elasticsearch and fails unless documents for `service.name=bootcamp-django` are present within the time window
+- starts Django with the `docker-compose.otel.yml` override
+- generates traffic against a few Django endpoints
+- queries Elasticsearch and fails the script unless it sees documents for `service.name=bootcamp-django` show up within the wait window
 
-You can customize the service name and wait timeout:
+If you ever need to point this at a different service or give it more time to wait, you can override either via env vars:
 
 ```bash
 $ APM_SERVICE_NAME=bootcamp-django MAX_WAIT_SECONDS=240 ./scripts/test-apm-e2e.sh
