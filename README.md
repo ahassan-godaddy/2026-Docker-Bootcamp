@@ -2,8 +2,6 @@
 
 ## Introduction to Docker
 
-> The goal of this bootcamp exercise is to provide an overview of one of the newer components of CI/CD: containers.
-
 ### What is Docker?
 
 _![That's a big question](https://31.media.tumblr.com/a4a72524f0bc49663881898367b5246a/tumblr_ns8pm9eEwN1tq4of6o1_540.gif)_
@@ -16,6 +14,10 @@ Essentially,
 
 - Docker is a tool that allows you to package code into a Docker image (a re-usable file used to execute code in a Docker container).
 - Docker images are the blueprint for Docker containers, which are isolated execution environments.
+
+> If those two terms — "image" and "container" — feel a little squishy, here's an analogy that helps: an image is to a container what a class is to an object, or what a recipe is to a meal. The image is the static, reusable definition. The container is a live, running instance of that definition. You build an image once, then run it as many containers as you want.
+
+> If you've heard of virtual machines (VMs) before, you might be wondering how containers are different. The short version: a VM boots a whole guest operating system on top of your host (full kernel, full init system, full everything), which is heavy and slow. A container shares the host's kernel and only ships your app and its dependencies, which is way lighter and faster to start.
 
 ### Why use Docker?
 
@@ -71,6 +73,8 @@ Run Ubuntu in Windows and then type:
 sudo su -
 ```
 
+(That command switches you to the `root` user — the all-powerful admin account on Linux. Docker on WSL needs to run as root, which is why we're switching.)
+
 Then type:
 
 ```shell
@@ -78,6 +82,8 @@ docker
 ```
 
 This should print the Docker help menu.
+
+> Quick aside on what's actually running: when you install Docker Desktop, it spins up a background process called the **Docker daemon** (sometimes you'll see it called `dockerd`). Every `docker ...` command you type is just a tiny CLI that talks to that daemon over a socket — the daemon is the thing that actually downloads images, starts containers, and manages networks. If you ever stop Docker Desktop, every `docker` command will fail with "Cannot connect to the Docker daemon." That's why.
 
 ### What does a Docker Image look like?
 
@@ -103,6 +109,10 @@ COPY . .
 CMD [ "python3", "-m" , "flask", "run", "--host=0.0.0.0"]
 ```
 
+> One thing that confuses a lot of people their first time looking at a Dockerfile: there are two completely different "phases" mixed in here. `FROM`, `WORKDIR`, `COPY`, and `RUN` all happen at **build time** (when you run `docker build`) — they're the steps that produce the image. `CMD` (and its cousin `ENTRYPOINT`, which we'll see later) is what runs at **run time** (when you `docker run` the resulting image). So when you see `RUN pip install ...` in a Dockerfile, that's installing dependencies _into the image_ as it's being built, not every time the container starts.
+
+> Each of those build-time instructions also creates a new **layer** — kind of like a stack of transparency sheets where each one only contains the changes from that step. The final image is all the layers stacked together. We'll come back to layers when we build our own image and watch the cache work.
+
 ## Deploying an Open Source image
 
 Each image is different in terms of how you configure the specifics for the application running inside. What's common though, is _how_ you configure the containers. Most images are configured using environment variables and/or by mounting a local Docker volume with configuration files present. 
@@ -119,7 +129,7 @@ Ok, let's get started.
 
 ### Pull the Valkey image
 
-All we need to do is type `docker pull REPOSITORY[:TAG]`. What does this syntax mean? Well docker images are stored in repositories, just like code is stored in git repositories. By default, all images are pulled from DockerHub. You are able to create and manage your own image repositories, but we won't go over that. The image repository is required, but the tag isn't and will be defaulted to `latest` if nothing is given for it.
+All we need to do is type `docker pull REPOSITORY[:TAG]`. What does this syntax mean? Well docker images are stored in repositories, just like code is stored in git repositories. By default, all images are pulled from [Docker Hub](https://hub.docker.com) - that's a public registry where companies and individuals share their images, kind of like GitHub but for container images. You can also stand up private registries (and big companies usually do), but we won't go over that. The image repository is required, but the tag isn't and will be defaulted to `latest` if nothing is given for it.
 
 ```bash
 docker pull valkey/valkey:8-alpine
@@ -170,7 +180,9 @@ This should spit out the docker image id, which is a unique identifier for the c
 
 ### Expose the cache to your host
 
-So our cache is running, but we can't actually connect to it from our laptop. The container is listening on port 6379, but only inside Docker's internal network. To talk to it from our host, we need to publish the port using `-p`. Let's stop our existing container and try again:
+> Quick networking primer if you haven't done much of this before. A **port** is just a number that identifies a specific service on a machine — Valkey defaults to 6379 the way HTTP defaults to 80 and SSH defaults to 22. Multiple services can run on the same machine because they each pick a different port. When we say a container is "listening on port 6379", we mean a process inside it is waiting for connections on that number.
+
+So our cache is running, but we can't actually connect to it from our laptop. The container is listening on port 6379, but only inside Docker's internal network (Docker creates this private network automatically when the daemon starts). To talk to it from our host, we need to publish the port using `-p`. Let's stop our existing container and try again:
 
 ```bash
 docker rm -f cache
@@ -185,7 +197,7 @@ NAMES     PORTS
 cache     127.0.0.1:6379->6379/tcp
 ```
 
-The `-p HOST_IP:HOST_PORT:CONTAINER_PORT` syntax tells Docker to forward traffic from `127.0.0.1:6379` on our host into the container's port 6379. We're using `127.0.0.1` (loopback) so the port is reachable from our own machine but not from anyone else on the network.
+The `-p HOST_IP:HOST_PORT:CONTAINER_PORT` syntax tells Docker to forward traffic from `127.0.0.1:6379` on our host into the container's port 6379. The `127.0.0.1` (also called "loopback" or `localhost`) means "this machine only" — it's an address that always points back at the local computer and isn't reachable from anywhere else. Picking it makes our cache reachable from our own machine but not from anyone else on the network.
 
 Yay! Now our host can talk to Valkey on `localhost:6379`. We can prove it by running another disposable container that connects through the host's network:
 
@@ -193,11 +205,13 @@ Yay! Now our host can talk to Valkey on `localhost:6379`. We can prove it by run
 docker run --rm valkey/valkey:8-alpine redis-cli -h host.docker.internal ping
 ```
 
+> `host.docker.internal` is a special hostname that Docker invents inside containers — it always resolves back to your host machine. Containers can use it to talk to services running on your laptop without having to know the laptop's actual IP address (which changes when you switch wifi networks).
+
 ```
 PONG
 ```
 
-> If you skip the IP and just write `-p 6379:6379`, Docker binds to `0.0.0.0` and exposes the port on every interface. That's what you want when another machine on your LAN actually needs to connect, but it's easy to forget about and leak on coffeeshop wifi. I'd recommend defaulting to loopback and only broadening when you need to.
+> If you skip the IP and just write `-p 6379:6379`, Docker binds to `0.0.0.0`, which means "all the network interfaces this machine has" — wifi, ethernet, anything else. That's what you want when another machine on your LAN actually needs to connect, but it's easy to forget about and leak on coffeeshop wifi. I'd recommend defaulting to loopback and only broadening when you need to.
 
 ### View container in container list
 
@@ -240,6 +254,7 @@ Valkey (like Redis) is a key-value cache, so it allows for very quick reads and 
 Read the following command like: 
 > docker Execute interactive (-i) with a real shell (-t) cache (container name) redis-cli (command to run inside container) SET myname Andrew (arguments for the command ie. redis-cli)
 
+> If `docker exec` feels confusing: think of it like SSH-ing into a remote machine. The container is already running and minding its business; `exec` just starts a new process inside it that shares its filesystem and network. The `-it` flag pair (`-i` interactive, `-t` allocate a TTY) is what makes it feel like a real interactive terminal session.
 
 ```bash
 docker exec -it cache redis-cli SET myname Andrew
@@ -368,7 +383,7 @@ CONTAINER ID   NAME      CPU %     MEM USAGE / LIMIT   MEM %     NET I/O        
 61f1e97c6d75   cache     0.35%     12.72MiB / 64MiB    19.88%    1.17kB / 126B   0B / 0B     5
 ```
 
-There it is in the `MEM USAGE / LIMIT` column - our 64 MiB ceiling. If the container ever tries to allocate past that limit, the Linux OOM killer terminates the process inside. Docker's just leaning on the kernel's cgroups to enforce all this for us.
+There it is in the `MEM USAGE / LIMIT` column - our 64 MiB ceiling. If the container ever tries to allocate past that limit, the Linux OOM killer (out-of-memory killer - a kernel feature that picks a process to terminate when memory runs out) steps in and kills the process inside. Docker's just leaning on the kernel's cgroups (control groups - the Linux feature that lets the OS group processes and enforce resource limits on them) to do all this for us.
 
 ### Bringing the container back when it falls over
 
@@ -410,9 +425,9 @@ docker rm -f cache
 
 ## Using [Docker Volumes](https://docs.docker.com/storage/volumes/) to preserve container data
 
-In modern container orchestration technologies such as Kubernetes or Docker-Swarm, it's extremely common for containers to be removed and replaced with a different container. These two containers will have different ids, but they run the same application. As we just saw, when a container is removed it's data is also removed... so how can we make sure that the cache data isn't deleted when the container is deleted?
+In modern container orchestration technologies such as Kubernetes or Docker-Swarm (those are tools that schedule and manage containers across many machines — we won't go into them in this workshop, but it's good to know they exist), it's extremely common for containers to be removed and replaced with a different container. These two containers will have different ids, but they run the same application. As we just saw, when a container is removed it's data is also removed... so how can we make sure that the cache data isn't deleted when the container is deleted? This matters a lot for **stateful** applications — things like databases or caches that are supposed to remember data between restarts. (Stateless apps, like a static web server, don't have this problem because they forget everything on every start anyway.)
 
-> Docker Volumes allow you to map directories and files from the host os into the container os. 
+> Docker Volumes give you a chunk of persistent storage that lives outside the container's lifecycle. Docker manages where the data actually sits on disk for you (on Mac/Windows it ends up inside the Docker Desktop VM; on Linux it's in `/var/lib/docker/volumes`). There's a related concept called a **bind mount** where you point at a specific directory on your host instead — we'll see those used in Part 2 for things like mounting source code into a dev container.
 
 ### Create a data volume
 
@@ -547,11 +562,13 @@ ENTRYPOINT [ "python3", "cache_client.py"]
 
 Using this image, we can build a container that can run our app on almost any machine with that has Docker installed. 
 
+> A quick note on `ENTRYPOINT` vs `CMD`: you saw `CMD` in the first Dockerfile we looked at; here we're using `ENTRYPOINT`. Both define what runs when the container starts — the difference is that `ENTRYPOINT` is the executable that always runs, and any extra arguments you pass to `docker run` become _arguments_ to it. So `docker run bootcamp check_cache` runs `python3 cache_client.py check_cache`. With `CMD`, those extra arguments would replace the whole command instead of being appended to it. `ENTRYPOINT` is what you want when your image is essentially "a wrapped binary."
+
 > Question to think about: Why would we copy over the requirements file first, before copying over the rest of the app?
 
 ### Build our image
 
-Build our container and tag (name) it as "bootcamp". The trailing `redis_client_app` tells docker what context to use for building the image. In this case we want to be inside of the folder that has our code.
+Build our container and tag (name) it as "bootcamp". The trailing `redis_client_app` tells docker what **build context** to use — that's the directory Docker packages up and ships to the daemon to build from. In this case we want to be inside the folder that has our code. Hold on to that "build context" term, you'll see it again soon.
 
 ```bash
 docker build -f redis_client_app/Dockerfile -t bootcamp redis_client_app
@@ -684,7 +701,7 @@ python       3.13-slim-trixie   143MB
 
 Our app image is only about 20 MB heavier than the bare Python base. Without multi-stage builds, a naive `FROM python:3.13` + `RUN pip install` setup would easily land at 1+ GB because the full Python image plus all of pip's caches and toolchain would stick around. Multi-stage is how we ship lean images without having to rewrite our app in Go.
 
-> If you want to take this even further, you can swap the final stage for a distroless image to shrink the attack surface even more. Something like:
+> If you want to take this even further, you can swap the final stage for a distroless image (these are base images with literally no shell, no package manager, no extra utilities — just Python and your code) to shrink the attack surface (the parts of your system an attacker could try to exploit; smaller is better) even more. Something like:
 > ```Docker
 > FROM gcr.io/distroless/python3-debian12
 > WORKDIR /app
@@ -741,6 +758,8 @@ redis.exceptions.ConnectionError: Error -2 connecting to cache:6379. Name or ser
 > Doh! What's going on? Well remember how everything is isolated, this is actually a good thing. You need to explicitly tell docker that these containers can communicate with eachother. To do this, we need to create a Docker Network.
 
 #### Quick sidebar - the `-e` flag we mentioned earlier
+
+> If you've never run into them before: an **environment variable** is just a key/value pair (like `DATABASE_URL=postgres://...` or `LOG_LEVEL=debug`) that any process running on the system can read. Programs check them at startup to find things like database hostnames, API keys, and feature flags - they're a clean way to configure software without having to recompile or edit code. Every operating system has them, and they're inherited by child processes. Docker containers get their own isolated set, and `-e` lets us pre-populate them.
 
 Before we wire up the network, take another look at the error message above. It says `connecting to cache:6379`. Where did `cache` come from? It's the default in our Python code: `os.environ.get("CACHE_HOST", "cache")`. We don't want to bake configuration like hostnames into our image - we want to be able to inject it at runtime. That's exactly what the `-e` flag is for:
 
@@ -873,6 +892,8 @@ There is! With docker compose, we can combine everything we've learned so far in
 
 The `docker-compose.yml` file has it's own syntax, syntax verions, and a [ton of useful tools](https://docs.docker.com/compose/compose-file/compose-file-v3/) that we won't have time to go over here.
 
+> If you haven't seen YAML before, it's an indentation-based config format - kind of like JSON but designed to be more human-friendly. Indentation is meaningful (so be careful with tabs vs spaces - YAML wants spaces), `key: value` defines a property, and items prefixed with `-` are list entries. That's basically all you need to know to read this.
+
 Here's what [a docker-compose.yml file](/redis_client_app/docker-compose.yml) looks like: 
 
 ```bash
@@ -995,7 +1016,7 @@ redis_client_app-app-1       redis_client_app-app     "/bin/sh"                a
 redis_client_app-cache-1     valkey/valkey:8-alpine   "docker-entrypoint.s…"   cache     Up 8 seconds            6379/tcp
 ```
 
-> The `Healthy` status above indicates that the command we defined as the healthcheck is returning without failing.
+> The `Healthy` status above indicates that the command we defined as the healthcheck is returning without failing. Docker runs that command on whatever interval you set (every 3 seconds in our compose file) and watches the exit code: zero means healthy, non-zero means unhealthy. Healthchecks are how other services can wait for this one to actually be ready before they start using it.
 
 ##### Side note
 
@@ -1278,7 +1299,7 @@ docker scout cves bootcamp:2026
 docker scout recommendations bootcamp:2026
 ```
 
-`quickview` gives you a high-level summary, `cves` lists every known CVE in the image and its dependencies, and `recommendations` suggests things you can change (like newer base images) to clean up the issues. Pretty handy as a last step in your workflow before shipping.
+`quickview` gives you a high-level summary, `cves` lists every known CVE (CVE = "Common Vulnerabilities and Exposures" — a publicly tracked security flaw with an ID like `CVE-2024-12345`) in the image and its dependencies, and `recommendations` suggests things you can change (like newer base images) to clean up the issues. Pretty handy as a last step in your workflow before shipping.
 
 ## Final Thoughts
 
