@@ -1,3 +1,5 @@
+.DS_Store
+
 django_app_for_part_2/Django/data/**
 django_app_for_part_2/Django/static/**
 django_app_for_part_2/Django/secrets/**
