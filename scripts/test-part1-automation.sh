@@ -71,6 +71,20 @@ run_tests() {
   log "Docker Scout quickview smoke check"
   docker scout quickview "$CUSTOM_IMAGE_NAME" >/dev/null || log "docker scout not available; skipping"
 
+  log "Docker Model Runner smoke check"
+  if docker model version >/dev/null 2>&1; then
+    docker model pull ai/smollm2 >/dev/null 2>&1
+    RESPONSE=$(echo "Say hello in exactly 3 words" | docker model run ai/smollm2 2>&1)
+    if [ -n "$RESPONSE" ]; then
+      log "DMR response: $RESPONSE"
+    else
+      log "DMR returned empty response; skipping"
+    fi
+    docker model rm ai/smollm2 >/dev/null 2>&1 || true
+  else
+    log "docker model not available; skipping"
+  fi
+
   log "Part 1 automation complete"
 }
 

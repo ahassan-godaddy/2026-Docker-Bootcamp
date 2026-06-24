@@ -1300,6 +1300,105 @@ docker scout recommendations bootcamp:2026
 
 `quickview` gives you a high-level summary, `cves` lists every known CVE (CVE = "Common Vulnerabilities and Exposures" — a publicly tracked security flaw with an ID like `CVE-2024-12345`) in the image and its dependencies, and `recommendations` suggests things you can change (like newer base images) to clean up the issues. Pretty handy as a last step in your workflow before shipping.
 
+## Running a Local LLM in Docker
+
+One of the coolest things you can do with Docker is spin up a local large language model in a single command. No Python environment to set up, no dependencies to wrestle with — Docker Desktop ships with a built-in inference engine called **Docker Model Runner** (DMR) that handles everything.
+
+### Enable Docker Model Runner
+
+In Docker Desktop, go to **Settings → AI → Enable Docker Model Runner**. That's it — no containers to configure, no extra images to pull. DMR runs as part of the Docker engine itself using llama.cpp under the hood.
+
+Verify it's working:
+
+```bash
+docker model version
+```
+
+```
+Docker Model Runner version v0.1.41
+Docker Engine Kind: Docker Desktop
+```
+
+### Pull a small model
+
+SmolLM2 is a 362 million parameter model that weighs in at just 270 MB — small enough to run on any laptop without a GPU:
+
+```bash
+docker model pull ai/smollm2
+```
+
+```
+Downloaded 270.60MB of 270.60MB
+Model pulled successfully
+```
+
+Models are pulled from Docker Hub as OCI artifacts (the same format as container images) and cached locally. You only download them once.
+
+### List your models
+
+```bash
+docker model list
+```
+
+```
+MODEL NAME  PARAMETERS  QUANTIZATION    ARCHITECTURE  MODEL ID      CREATED        SIZE
+ai/smollm2  361.82 M    IQ2_XXS/Q4_K_M  llama         354bf30d0aa3  15 months ago  256.35 MiB
+```
+
+### Chat with it
+
+You can talk to the model directly from the command line by piping in a prompt:
+
+```bash
+echo "What is Docker in one sentence?" | docker model run ai/smollm2
+```
+
+```
+Docker is a package manager that enables running multiple operating systems
+on a single computer in a container, making it a popular choice for
+developers and IT professionals.
+```
+
+Or ask it to explain something simply:
+
+```bash
+echo "Explain containers to a 5 year old in 2 sentences" | docker model run ai/smollm2
+```
+
+```
+Imagine you have many toys in your house, and you want to pack them up to
+take them somewhere. Containers can help you do that! They are special boxes
+that you can put your toys inside to keep everything safe and organized.
+```
+
+Running `docker model run ai/smollm2` without a pipe drops you into an interactive chat session — type your messages and hit Enter, then Ctrl-D or Ctrl-C to exit.
+
+### Use the REST API
+
+DMR also exposes an OpenAI-compatible API. From inside a container, hit `http://model-runner.docker.internal`:
+
+```python
+import requests
+
+response = requests.post("http://model-runner.docker.internal/engines/v1/chat/completions", json={
+    "model": "ai/smollm2",
+    "messages": [{"role": "user", "content": "What is a Docker volume?"}],
+})
+print(response.json()["choices"][0]["message"]["content"])
+```
+
+This means any container in your compose stack can call the model without network config or extra services — DMR is just part of Docker.
+
+### Why this matters
+
+The pattern here is exactly what we've been doing all workshop — pull something from a registry, run it, talk to it. The fact that it happens to be running a language model is incidental. You could add an `/ask` endpoint to your Django app from Part 2 that proxies to DMR, and you'd have an AI-powered web app running entirely on your laptop with zero cloud dependencies.
+
+### Clean up
+
+```bash
+docker model rm ai/smollm2
+```
+
 ## Final Thoughts
 
 By going through this exercise, you should have a better idea of what Docker is and what kinds of things you can do with it. There is so much more to explore, here are just a few things that i've found fun while working with it:
