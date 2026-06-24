@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-APP_DIR="$PROJECT_ROOT/redis_client_app"
+APP_DIR="$PROJECT_ROOT/cache_client_app"
 
 VALKEY_CONTAINER_NAME="valkey-bootcamp-test"
 CUSTOM_IMAGE_NAME="bootcamp-2026-test"
@@ -42,8 +42,8 @@ run_tests() {
   docker logs "$VALKEY_CONTAINER_NAME" | grep -q "Ready to accept connections"
 
   log "Validating key/value flow"
-  docker exec "$VALKEY_CONTAINER_NAME" redis-cli SET myname Andrew | grep -q "OK"
-  docker exec "$VALKEY_CONTAINER_NAME" redis-cli GET myname | grep -Eq '"Andrew"|Andrew'
+  docker exec "$VALKEY_CONTAINER_NAME" valkey-cli SET myname Andrew | grep -q "OK"
+  docker exec "$VALKEY_CONTAINER_NAME" valkey-cli GET myname | grep -Eq '"Andrew"|Andrew'
 
   log "Building cache client image"
   docker build -f "$APP_DIR/Dockerfile" -t "$CUSTOM_IMAGE_NAME" "$APP_DIR" >/dev/null

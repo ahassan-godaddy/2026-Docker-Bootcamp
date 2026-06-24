@@ -30,10 +30,12 @@ require_prereqs() {
 }
 
 ensure_secret_permissions() {
-  local elastic_secret="$ELK_DIR/secrets/elasticsearch_password.txt"
   local postgres_secret="$DJANGO_DIR/secrets/postgres_password.txt"
-
-  [ -f "$elastic_secret" ] && chmod 600 "$elastic_secret"
+  if [ ! -f "$postgres_secret" ]; then
+    if [ -f "$DJANGO_DIR/secrets/postgres_password.example.txt" ]; then
+      cp "$DJANGO_DIR/secrets/postgres_password.example.txt" "$postgres_secret"
+    fi
+  fi
   [ -f "$postgres_secret" ] && chmod 600 "$postgres_secret"
 }
 
@@ -50,9 +52,7 @@ wait_for_http() {
 }
 
 wait_for_elasticsearch() {
-  local elastic_secret="$ELK_DIR/secrets/elasticsearch_password.txt"
-  local elastic_password
-  elastic_password="$(tr -d '\r\n' < "$elastic_secret")"
+  local elastic_password="${ELASTIC_PASSWORD:-bootcamp-elastic}"
 
   local tries=40
   for _ in $(seq 1 "$tries"); do

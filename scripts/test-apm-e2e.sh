@@ -88,6 +88,7 @@ start_stack() {
   log "Starting Django + OTel override"
   (
     cd "$DJANGO_DIR"
+    docker compose -f docker-compose.yml -f docker-compose.otel.yml down --remove-orphans >/dev/null 2>&1 || true
     docker compose -f docker-compose.yml -f docker-compose.otel.yml up -d --build
   )
 

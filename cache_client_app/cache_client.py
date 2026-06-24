@@ -1,5 +1,5 @@
 import fire
-from redis import Redis
+from valkey import Valkey
 import os
 
 CACHE_HOST = os.environ.get("CACHE_HOST", "cache")
@@ -31,7 +31,7 @@ def get_data(key=None, *a, **k):
 
 
 def get_cache_client():
-    return Redis(host=CACHE_HOST)
+    return Valkey(host=CACHE_HOST)
 
 
 def hello_world():

@@ -23,7 +23,7 @@ Essentially,
 
 - Docker is a standard package that works across multiple architectures and environment type. i.e. Build a single Docker image that would run the same on Windows vs Mac. 
 - Integrate with popular [open-source solutions](https://hub.docker.com/search?q=&type=image) for databases, caching, monitoring, gaming, and more.
-- Since each container is isolated by default, the security from Docker can be unparallelled. For example, consider a web appliction that runs inside of a container. If the application was compriomised by bad actors, they'd only have access to the contents of the container, and not the entire host filesystem.
+- Containers are isolated by default, which shrinks the blast radius of a compromise. For example, if a web application running inside a container is exploited, the attacker lands inside the container's filesystem and namespaces — not the host. This isn't bulletproof (container escapes exist, and misconfiguration like running as root or mounting the Docker socket weakens the boundary), but it's a meaningful layer of defense compared to running services directly on the host.
 - [So much more...](https://www.docker.com/use-cases)
 
 ### Install Docker
@@ -121,9 +121,9 @@ Let's look at Valkey, as it's a very popular and useful key-value store and cach
 
 ### What is Valkey?
 
-Valkey is an in-memory key-value data store that you can use as a database, a cache, a streaming engine, or a message broker. If you've heard of Redis before, Valkey is going to look pretty familiar - it's actually a Linux Foundation fork of Redis that started in 2024 (after Redis Inc. switched to a non-OSI license). The good news is that Valkey stays BSD-licensed and it's a drop-in replacement, so the same wire protocol, the same `redis-cli`, and the same Python client all work.
+Valkey is an in-memory key-value data store that you can use as a database, a cache, a streaming engine, or a message broker. It's a Linux Foundation fork of Redis that started in 2024 (after Redis Inc. switched to a non-OSI license). Valkey stays BSD-licensed and is a drop-in replacement, so the same wire protocol, the same `valkey-cli`, and the same Python client all work.
 
-On my team, we make use of a [library](https://python-rq.org) called `RQ-Python` that builds a queuing system for Python jobs on top of a Redis-compatible store like Valkey. We create thousands of jobs each night and have hundreds of worker containers that perform the jobs.
+On my team, we make use of a [library](https://python-rq.org) called `RQ-Python` that builds a queuing system for Python jobs on top of Valkey. We create thousands of jobs each night and have hundreds of worker containers that perform the jobs.
 
 Ok, let's get started.
 
@@ -137,18 +137,17 @@ docker pull valkey/valkey:8-alpine
 
 Which should output something like: 
 ```
-Using default tag: latest
-latest: Pulling from library/redis
+8-alpine: Pulling from valkey/valkey
 Digest: sha256:7e2c6181ad5c425443b56c7c73a9cd6df24a122345847d1ea9bb86a5afc76325
 Status: Image is up to date for valkey/valkey:8-alpine
-docker.io/library/valkey/valkey:8-alpine
+docker.io/valkey/valkey:8-alpine
 ```
 
 What is happening here? You are pulling the Valkey image from Docker Hub.
 
 > If you ever need really reproducible builds (like in CI), it's a good idea to pin by digest instead of tag. You can grab the digest with `docker buildx imagetools inspect valkey/valkey:8-alpine` and then reference it as `valkey/valkey@sha256:<digest>`.
 
-If you click on one of the tags in that repo, you can see the Dockerfile that backs the image. Here's an example of what an opensource image looks like: https://github.com/redis/docker-library-redis/blob/0d682fed252b85f39d2033294eab217be02f95a1/7.4-rc/debian/Dockerfile
+If you click on one of the tags in that repo, you can see the Dockerfile that backs the image. Here's an example of what an opensource image looks like: https://github.com/valkey-io/valkey-container/blob/mainline/debian/Dockerfile
 
 ### Inspect the Valkey image
 
@@ -202,7 +201,7 @@ The `-p HOST_IP:HOST_PORT:CONTAINER_PORT` syntax tells Docker to forward traffic
 Yay! Now our host can talk to Valkey on `localhost:6379`. We can prove it by running another disposable container that connects through the host's network:
 
 ```bash
-docker run --rm valkey/valkey:8-alpine redis-cli -h host.docker.internal ping
+docker run --rm valkey/valkey:8-alpine valkey-cli -h host.docker.internal ping
 ```
 
 > `host.docker.internal` is a special hostname that Docker invents inside containers — it always resolves back to your host machine. Containers can use it to talk to services running on your laptop without having to know the laptop's actual IP address (which changes when you switch wifi networks).
@@ -223,8 +222,8 @@ docker ps
 
 This should output something like: 
 ```
-CONTAINER ID   IMAGE                    COMMAND                  CREATED          STATUS          PORTS      NAMES
-16ad2cca6925   valkey/valkey:8-alpine   "docker-entrypoint.s…"   22 seconds ago   Up 21 seconds   6379/tcp   cache
+CONTAINER ID   IMAGE                    COMMAND                  CREATED          STATUS          PORTS                      NAMES
+16ad2cca6925   valkey/valkey:8-alpine   "docker-entrypoint.s…"   22 seconds ago   Up 21 seconds   127.0.0.1:6379->6379/tcp   cache
 ```
 
 There's our docker container running with Valkey inside of it. The `STATUS` column tells us that the container is `Up` and has been running for 21 seconds. The `PORTS` column tells us that the container is listening on port `6379`.
@@ -249,18 +248,18 @@ The logs will be different depending on the container being used, but here we se
 
 ### Store data in the cache
 
-Valkey (like Redis) is a key-value cache, so it allows for very quick reads and writes. Let's store some data.
+Valkey is a key-value cache, so it allows for very quick reads and writes. Let's store some data.
 
 Read the following command like: 
-> docker Execute interactive (-i) with a real shell (-t) cache (container name) redis-cli (command to run inside container) SET myname Andrew (arguments for the command ie. redis-cli)
+> docker Execute interactive (-i) with a real shell (-t) cache (container name) valkey-cli (command to run inside container) SET myname Andrew (arguments for the command ie. valkey-cli)
 
 > If `docker exec` feels confusing: think of it like SSH-ing into a remote machine. The container is already running and minding its business; `exec` just starts a new process inside it that shares its filesystem and network. The `-it` flag pair (`-i` interactive, `-t` allocate a TTY) is what makes it feel like a real interactive terminal session.
 
 ```bash
-docker exec -it cache redis-cli SET myname Andrew
+docker exec -it cache valkey-cli SET myname Andrew
 ```
 
-Here we are using `redis-cli` (the CLI tool that Valkey ships) to interact with the cache inside a container named `cache`. Which should output: 
+Here we are using `valkey-cli` (the CLI tool that Valkey ships) to interact with the cache inside a container named `cache`. Which should output: 
 ```
 OK
 ```
@@ -272,7 +271,7 @@ This is the response from the cache, telling us that the data was stored success
 Retrieving the data we put into the cache is just as easy as storing it. 
 
 ```bash
-docker exec -it cache redis-cli GET myname
+docker exec -it cache valkey-cli GET myname
 ```
 
 Which should output: 
@@ -296,7 +295,7 @@ The container is no longer running, but the data is still stored in the containe
 ### Try to get data again
 
 ```bash
-docker exec -it cache redis-cli GET myname
+docker exec -it cache valkey-cli GET myname
 ```
 
 ```
@@ -322,7 +321,7 @@ cache
 When you try to get the data again, this time, we see that the data is still there.
 
 ```bash
-docker exec -it cache redis-cli GET myname
+docker exec -it cache valkey-cli GET myname
 ```
 
 Which should output: 
@@ -353,7 +352,7 @@ Now we are going to create the container, this time with the `--rm` option which
 Once it's started, we will attempt to get the data again. Either way, we stop the container when we are done with it (which will destroy the container).
 
 ```bash
-docker run --rm --name cache -d valkey/valkey:8-alpine && docker exec -it cache redis-cli GET myname; docker stop cache;
+docker run --rm --name cache -d valkey/valkey:8-alpine && docker exec -it cache valkey-cli GET myname; docker stop cache;
 ```
 
 Which should output: 
@@ -394,7 +393,7 @@ docker rm -f cache
 docker run --name cache --restart unless-stopped -d valkey/valkey:8-alpine
 
 # Simulate a crash by telling Valkey to shut itself down ungracefully
-docker exec cache redis-cli SHUTDOWN NOSAVE || true
+docker exec cache valkey-cli SHUTDOWN NOSAVE || true
 sleep 3
 docker ps --filter name=cache --format "table {{.Names}}\t{{.Status}}"
 docker inspect cache --format 'RestartCount={{.RestartCount}}'
@@ -413,7 +412,7 @@ The container died and Docker brought it back! `RestartCount=1` is the proof. Th
 - `always` - restart no matter what, including when the Docker daemon itself restarts.
 - `unless-stopped` - like `always`, but if you ran `docker stop cache` yourself, it stays stopped. This is usually the one you want.
 
-> Heads up: if you're using Docker Desktop, `docker kill cache` won't actually trigger a restart - it's treated as user intent. To test the policy you'll need to simulate a real crash from inside the container, like the `SHUTDOWN NOSAVE` above.
+> Note: `docker stop` signals intentional shutdown — `unless-stopped` honours that and won't restart the container. But `docker kill` sends SIGKILL, which looks like a crash, so the restart policy _will_ kick in. That's why we simulate a crash from inside the container with `SHUTDOWN NOSAVE` instead.
 
 We'll see one more useful runtime flag - `-e` for setting environment variables - in a bit, after we've built our own image.
 
@@ -460,10 +459,10 @@ This should output the container id, which is a unique identifier for the contai
 Let's create some data, then exit the container.
 
 ```bash
-docker exec -it cache redis-cli
+docker exec -it cache valkey-cli
 ```
 
-Which will take you into the redis-cli shell. Run these commands:
+Which will take you into the valkey-cli shell. Run these commands:
 
 ```
 127.0.0.1:6379> SET myname Andrew
@@ -476,22 +475,22 @@ OK
 Then exit the container. Validate that our new data is present by running:
 
 ```bash
-docker exec -it cache redis-cli GET moredata
+docker exec -it cache valkey-cli GET moredata
 ```
 
 Which should output:
 
 ```text
-"Potato
+"potato"
 ```
 
 Now let's go back into the container and run these commands manually.
 
 ```bash
-docker exec -it cache redis-cli
+docker exec -it cache valkey-cli
 ```
 
-Which will take you back into the redis-cli shell. Run these commands to validate that the data still exists:
+Which will take you back into the valkey-cli shell. Run these commands to validate that the data still exists:
 
 ```
 127.0.0.1:6379> GET myname
@@ -529,7 +528,7 @@ docker run -v cache_data:/data --name cache -d valkey/valkey:8-alpine
 ### Validate data persistence
 
 ```bash
-docker exec -it cache redis-cli GET myname
+docker exec -it cache valkey-cli GET myname
 ```
 
 ```
@@ -540,7 +539,7 @@ This is one of the most fundamental concepts of Docker. By using volumes, you ca
 
 ## Create custom Docker images
 
-Let's create a container to utilize the code in `redis_client_app/cache_client.py`. Our image is going to look very similar to the one we viewed earlier. With [Dockerfiles](/redis_client_app/Dockerfile), it's extremely important to put the things that change _least_ at the top, as Docker will build and cache the `layers` it generates from this file. This is so that on subsequent builds, you won't need to wait for the entire command again (unless you explicitly want to run it without cache, which is possible). 
+Let's create a container to utilize the code in `cache_client_app/cache_client.py`. Our image is going to look very similar to the one we viewed earlier. With [Dockerfiles](/cache_client_app/Dockerfile), it's extremely important to put the things that change _least_ at the top, as Docker will build and cache the `layers` it generates from this file. This is so that on subsequent builds, you won't need to wait for the entire command again (unless you explicitly want to run it without cache, which is possible). 
 
 ```Docker
 # syntax=docker/dockerfile:1
@@ -568,10 +567,10 @@ Using this image, we can build a container that can run our app on almost any ma
 
 ### Build our image
 
-Build our container and tag (name) it as "bootcamp". The trailing `redis_client_app` tells docker what **build context** to use — that's the directory Docker packages up and ships to the daemon to build from. In this case we want to be inside the folder that has our code. Hold on to that "build context" term, you'll see it again soon.
+Build our container and tag (name) it as "bootcamp". The trailing `cache_client_app` tells docker what **build context** to use — that's the directory Docker packages up and ships to the daemon to build from. In this case we want to be inside the folder that has our code. Hold on to that "build context" term, you'll see it again soon.
 
 ```bash
-docker build -f redis_client_app/Dockerfile -t bootcamp redis_client_app
+docker build -f cache_client_app/Dockerfile -t bootcamp cache_client_app
 ```
 
 ### Build it again, and watch the layer cache work
@@ -579,7 +578,7 @@ docker build -f redis_client_app/Dockerfile -t bootcamp redis_client_app
 Now run the exact same `docker build` command a second time:
 
 ```bash
-docker build -f redis_client_app/Dockerfile -t bootcamp redis_client_app
+docker build -f cache_client_app/Dockerfile -t bootcamp cache_client_app
 ```
 
 ```
@@ -600,8 +599,8 @@ Now let's edit a source file and rebuild:
 
 ```bash
 # pretend you fixed a typo in cache_client.py
-echo '# tweak' >> redis_client_app/cache_client.py
-docker build -f redis_client_app/Dockerfile -t bootcamp redis_client_app
+echo '# tweak' >> cache_client_app/cache_client.py
+docker build -f cache_client_app/Dockerfile -t bootcamp cache_client_app
 ```
 
 ```
@@ -620,8 +619,8 @@ The expensive dependency layers are still `CACHED`, but `COPY . .` and everythin
 To prove that, let's actually bust the dependency cache by touching `requirements.txt`:
 
 ```bash
-echo "" >> redis_client_app/requirements.txt
-docker build -f redis_client_app/Dockerfile -t bootcamp redis_client_app
+echo "" >> cache_client_app/requirements.txt
+docker build -f cache_client_app/Dockerfile -t bootcamp cache_client_app
 ```
 
 ```
@@ -630,7 +629,7 @@ docker build -f redis_client_app/Dockerfile -t bootcamp redis_client_app
 #11 [builder 3/4] COPY requirements.txt requirements.txt
 #11 DONE 0.0s
 #12 [builder 4/4] RUN pip install --upgrade pip && pip wheel --wheel-dir /wheels -r requirements.txt
-#12 0.834 Collecting redis==6.4.0 ...
+#12 0.834 Collecting valkey==6.1.1 ...
 #12 DONE 6.1s
 ```
 
@@ -642,8 +641,8 @@ Before moving on, let's revert the demo edits so our working tree is clean again
 
 ```bash
 # Drop the trailing comment we appended and the blank line in requirements.txt
-sed -i.bak -e '${/^# tweak$/d;}' redis_client_app/cache_client.py && rm redis_client_app/cache_client.py.bak
-sed -i.bak -e '${/^$/d;}' redis_client_app/requirements.txt && rm redis_client_app/requirements.txt.bak
+sed -i.bak -e '${/^# tweak$/d;}' cache_client_app/cache_client.py && rm cache_client_app/cache_client.py.bak
+sed -i.bak -e '${/^$/d;}' cache_client_app/requirements.txt && rm cache_client_app/requirements.txt.bak
 ```
 
 ### Use a `.dockerignore` to send less to the build daemon
@@ -651,11 +650,11 @@ sed -i.bak -e '${/^$/d;}' redis_client_app/requirements.txt && rm redis_client_a
 When we run `docker build`, the first thing Docker does is package up the entire directory we pointed at - this is called the _build context_ - and send it over to the build engine. Let's see how big our context actually is:
 
 ```bash
-du -sh redis_client_app
+du -sh cache_client_app
 ```
 
 ```
-20K	redis_client_app
+20K	cache_client_app
 ```
 
 20 KB is no big deal. But imagine if we had a `.git` folder in there, or a `.venv` with hundreds of MB of installed packages, or some local test data. All of it would be packaged up and sent on every single build, even if our Dockerfile never actually `COPY`s it. Worse, if we ever wrote `COPY . .`, files like `.env` with secrets could end up baked into our image. Yikes.
@@ -663,7 +662,7 @@ du -sh redis_client_app
 The fix is a file called `.dockerignore` that lives next to our Dockerfile. It uses the same syntax as `.gitignore`:
 
 ```bash
-cat redis_client_app/.dockerignore
+cat cache_client_app/.dockerignore
 ```
 
 ```
@@ -710,7 +709,7 @@ Our app image is only about 20 MB heavier than the bare Python base. Without mul
 > ENTRYPOINT ["python3", "cache_client.py"]
 > ```
 
-> Also, if you're on Apple Silicon and you want your image to also work on regular x86 servers, you can use BuildKit to build for multiple architectures at once: `docker buildx build --platform linux/amd64,linux/arm64 -t bootcamp:2026 redis_client_app`.
+> Also, if you're on Apple Silicon and you want your image to also work on regular x86 servers, you can use BuildKit to build for multiple architectures at once: `docker buildx build --platform linux/amd64,linux/arm64 -t bootcamp:2026 cache_client_app`.
 
 Let's run our code without arguments to see what it can do
 
@@ -748,11 +747,11 @@ docker run bootcamp check_cache
 Which should output something like:
 ```
 ...
-  File "/usr/local/lib/python3.8/site-packages/redis/connection.py", line 1192, in get_connection
+  File "/usr/local/lib/python3.13/site-packages/valkey/connection.py", line 1192, in get_connection
     connection.connect()
-  File "/usr/local/lib/python3.8/site-packages/redis/connection.py", line 563, in connect
+  File "/usr/local/lib/python3.13/site-packages/valkey/connection.py", line 563, in connect
     raise ConnectionError(self._error_message(e))
-redis.exceptions.ConnectionError: Error -2 connecting to cache:6379. Name or service not known.
+valkey.exceptions.ConnectionError: Error -2 connecting to cache:6379. Name or service not known.
 ```
 
 > Doh! What's going on? Well remember how everything is isolated, this is actually a good thing. You need to explicitly tell docker that these containers can communicate with eachother. To do this, we need to create a Docker Network.
@@ -768,9 +767,9 @@ docker run --rm -e CACHE_HOST=somehost.invalid bootcamp check_cache 2>&1 | tail 
 ```
 
 ```
-  File "/usr/local/lib/python3.13/site-packages/redis/connection.py", line 397, in connect_check_health
+  File "/usr/local/lib/python3.13/site-packages/valkey/connection.py", line 397, in connect_check_health
     raise ConnectionError(self._error_message(e))
-redis.exceptions.ConnectionError: Error -2 connecting to somehost.invalid:6379. Name or service not known.
+valkey.exceptions.ConnectionError: Error -2 connecting to somehost.invalid:6379. Name or service not known.
 ```
 
 Now the error references `somehost.invalid` instead of `cache`! Our injected value won. This is how one image can work in dev, staging, and prod - the env vars change, but the image stays the same. You can pass `-e` multiple times for multiple variables, or use `--env-file path/to/.env` to load a whole file at once.
@@ -781,7 +780,7 @@ Now the error references `somehost.invalid` instead of `cache`! Our injected val
 Create a docker network to act as an network environment for multiple containers.
 
 ```bash
-docker network create bootcamp_net --attachable
+docker network create bootcamp_net
 ```
 
 This should output the network id, which is a unique identifier for the network.
@@ -890,11 +889,11 @@ So far it's kind of been a nightmare of cli commands. There has to be a better w
 There is! With docker compose, we can combine everything we've learned so far into a single file that's easier to manage.
 ### docker compose files
 
-The `docker-compose.yml` file has it's own syntax, syntax verions, and a [ton of useful tools](https://docs.docker.com/compose/compose-file/compose-file-v3/) that we won't have time to go over here.
+The `docker-compose.yml` file has its own syntax, syntax versions, and a [ton of useful tools](https://docs.docker.com/compose/compose-file/compose-file-v3/) that we won't have time to go over here.
 
 > If you haven't seen YAML before, it's an indentation-based config format - kind of like JSON but designed to be more human-friendly. Indentation is meaningful (so be careful with tabs vs spaces - YAML wants spaces), `key: value` defines a property, and items prefixed with `-` are list entries. That's basically all you need to know to read this.
 
-Here's what [a docker-compose.yml file](/redis_client_app/docker-compose.yml) looks like: 
+Here's what [a docker-compose.yml file](/cache_client_app/docker-compose.yml) looks like: 
 
 ```bash
 # Create the network so that our containers can talk to each-other
@@ -947,7 +946,7 @@ Compose actually looks in a few different places for the value of a variable. In
 If you're not sure what compose will end up using, you can run `docker compose config` to preview it. This expands all the variables and prints the fully-resolved YAML:
 
 ```bash
-cd redis_client_app && docker compose config
+cd cache_client_app && docker compose config
 ```
 
 ```yaml
@@ -988,7 +987,7 @@ docker compose --env-file /tmp/bootcamp.env config | grep -A1 environment
 The following command will create the network, the volume, both containers (in the background), and the proper links:
 
 ```bash
-cd redis_client_app && docker compose up -d --build
+cd cache_client_app && docker compose up -d --build
 ```
 
 For live development in Compose v2.22+, run watch mode in a separate terminal:
@@ -999,8 +998,8 @@ docker compose watch
 
 ```
 ...
- Container redis_client_app-cache-1  Started
- Container redis_client_app-app-1    Started
+ Container cache_client_app-cache-1  Started
+ Container cache_client_app-app-1    Started
 ```
 
 #### docker compose ps
@@ -1012,8 +1011,8 @@ docker compose ps
 
 ```
 NAME                         IMAGE                    COMMAND                  SERVICE   STATUS                   PORTS
-redis_client_app-app-1       redis_client_app-app     "/bin/sh"                app       Up 8 seconds (healthy)
-redis_client_app-cache-1     valkey/valkey:8-alpine   "docker-entrypoint.s…"   cache     Up 8 seconds            6379/tcp
+cache_client_app-app-1       cache_client_app-app     "/bin/sh"                app       Up 8 seconds (healthy)
+cache_client_app-cache-1     valkey/valkey:8-alpine   "docker-entrypoint.s…"   cache     Up 8 seconds            6379/tcp
 ```
 
 > The `Healthy` status above indicates that the command we defined as the healthcheck is returning without failing. Docker runs that command on whatever interval you set (every 3 seconds in our compose file) and watches the exit code: zero means healthy, non-zero means unhealthy. Healthchecks are how other services can wait for this one to actually be ready before they start using it.
@@ -1098,8 +1097,8 @@ And now we can see the new container spinning up:
  
 ```text
 [+] Running 1/2
- ✔ Container redis_client_app-cache-1  Running
- ⠹ Container redis_client_app-cache-2  Started
+ ✔ Container cache_client_app-cache-1  Running
+ ⠹ Container cache_client_app-cache-2  Started
 ```
 
 or if you want to go crazy:
@@ -1110,16 +1109,16 @@ docker compose up -d --scale cache=10
 
 ```text
 [+] Running 1/10
- ✔ Container redis_client_app-cache-1   Running
- ⠼ Container redis_client_app-cache-10  Started
- ⠼ Container redis_client_app-cache-2   Started
- ⠼ Container redis_client_app-cache-4   Started
- ⠼ Container redis_client_app-cache-3   Started
- ⠼ Container redis_client_app-cache-6   Started
- ⠼ Container redis_client_app-cache-8   Started
- ⠼ Container redis_client_app-cache-9   Started
- ⠼ Container redis_client_app-cache-7   Started
- ⠼ Container redis_client_app-cache-5   Started
+ ✔ Container cache_client_app-cache-1   Running
+ ⠼ Container cache_client_app-cache-10  Started
+ ⠼ Container cache_client_app-cache-2   Started
+ ⠼ Container cache_client_app-cache-4   Started
+ ⠼ Container cache_client_app-cache-3   Started
+ ⠼ Container cache_client_app-cache-6   Started
+ ⠼ Container cache_client_app-cache-8   Started
+ ⠼ Container cache_client_app-cache-9   Started
+ ⠼ Container cache_client_app-cache-7   Started
+ ⠼ Container cache_client_app-cache-5   Started
 ```
 
 Why is this useful? Well, if you have a lot of jobs to do, you can spin up a lot of workers to do them. If you have a lot of traffic, you can spin up a lot of web servers to handle it. If you have a lot of data, you can spin up a lot of databases to store it. 
@@ -1184,15 +1183,15 @@ docker compose top
 Which will show you the top processes running in each container.
 
 ```text
-redis_client_app-app-1
+cache_client_app-app-1
 UID    PID     PPID    C    STIME   TTY   TIME       CMD
 root   80731   80713   0    22:59   ?     00:00:00   /bin/sh
 
-redis_client_app-cache-1
+cache_client_app-cache-1
 UID   PID     PPID    C    STIME   TTY   TIME       CMD
 999   79610   79578   0    22:57   ?     00:00:01   valkey-server *:6379
 
-redis_client_app-cache-2
+cache_client_app-cache-2
 UID   PID     PPID    C    STIME   TTY   TIME       CMD
 999   85169   85150   0    23:08   ?     00:00:00   valkey-server *:6379
 
@@ -1271,7 +1270,7 @@ docker compose build
 ...
  => => exporting layers                                                                                                                                                                                                                                                                                            0.0s
  => => writing image sha256:3cf82f189fc4a35542fc08a1663fe35a4f2e7262db398e041fa3c16839f7af57                                                                                                                                                                                                                       0.0s
- => => naming to docker.io/library/redis_client_app-app
+ => => naming to docker.io/library/cache_client_app-app
 ```
 
 If we put this image name in our `.devcontainer/devcontainer.json` file, we are able to use this image as a development environment.
@@ -1282,7 +1281,7 @@ Now in VSCode, in the bottom left, we should see a green button that looks like 
 1. Click on the `Run and Debug` section in VSCode
 2. Click on the `Run` button and you should see output similar to:
 ```bash
-root@a368d1296c1e:/workspaces/2026-Docker-Bootcamp#  cd /workspaces/2026-Docker-Bootcamp ; /usr/bin/env /usr/local/bin/python /root/.vscode-server/extensions/ms-python.python-2022.8.1/pythonFiles/lib/python/debugpy/launcher 46805 -- redis_client_app/cache_client.py hello_world
+root@a368d1296c1e:/workspaces/2026-Docker-Bootcamp#  cd /workspaces/2026-Docker-Bootcamp ; /usr/bin/env /usr/local/bin/python /root/.vscode-server/extensions/ms-python.python-2022.8.1/pythonFiles/lib/python/debugpy/launcher 46805 -- cache_client_app/cache_client.py hello_world
 Oh hai
 ```
 3. If you want to experiement more, add a breakpoint to the hello_world method and it should stop on that line next time you run.

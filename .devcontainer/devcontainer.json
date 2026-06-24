@@ -1,8 +1,8 @@
 {
 	"name": "Python 3",
 	"build": {
-		"dockerfile": "../redis_client_app/Dockerfile",
-		"context": "../redis_client_app"
+		"dockerfile": "../cache_client_app/Dockerfile",
+		"context": "../cache_client_app"
 	},
 	"customizations": {
 		"vscode": {

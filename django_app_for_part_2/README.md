@@ -321,16 +321,17 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://apm-server:8200"
       OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
       OTEL_SERVICE_NAME: "bootcamp-django"
+      OTEL_TRACES_EXPORTER: "otlp"
       OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=bootcamp"
-    networks: 
-        - elk_elastic
+    networks:
+      - elk_elastic
   db:
-    networks: 
-        - elk_elastic
+    networks:
+      - elk_elastic
 
-networks: 
-    elk_elastic:
-        external: true
+networks:
+  elk_elastic:
+    external: true
 ```
 
 This file provides the following overrides:
