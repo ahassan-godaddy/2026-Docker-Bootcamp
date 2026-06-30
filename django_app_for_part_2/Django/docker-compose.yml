@@ -15,6 +15,15 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+  cache:
+    # The same Valkey image we used in Part 1. The /ask endpoint uses it to
+    # cache LLM answers so repeated questions are instant.
+    image: valkey/valkey:8-alpine
+    healthcheck:
+      test: [ "CMD", "valkey-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   web:
     build: .
     labels:
@@ -28,6 +37,12 @@ services:
       OTEL_TRACES_EXPORTER: none
       OTEL_METRICS_EXPORTER: none
       OTEL_LOGS_EXPORTER: none
+      # Local LLM (Docker Model Runner). The /ask endpoint proxies to this.
+      LLM_BASE_URL: "http://model-runner.docker.internal/engines/v1"
+      LLM_MODEL: "ai/smollm2"
+      # Valkey cache used by the /ask endpoint.
+      CACHE_HOST: "cache"
+      CACHE_PORT: "6379"
     develop:
       watch:
         - action: sync
@@ -41,6 +56,8 @@ services:
       - postgres_password
     depends_on:
       db:
+        condition: service_healthy
+      cache:
         condition: service_healthy
 
 volumes:

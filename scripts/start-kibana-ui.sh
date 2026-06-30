@@ -70,7 +70,7 @@ create_kibana_token() {
 
   local token_output token_value
   token_output="$(docker exec es /usr/share/elasticsearch/bin/elasticsearch-service-tokens create elastic/kibana "$KIBANA_TOKEN_NAME")"
-  token_value="$(printf '%s\n' "$token_output" | awk -F'= ' '/SERVICE TOKEN/ {print $2}' | tr -d '[:space:]')"
+  token_value="$(printf '%s\n' "$token_output" | awk '/SERVICE_TOKEN/ {print $NF}' | tr -d '[:space:]')"
 
   [ -n "$token_value" ] || fail "failed to create Kibana service account token"
   export KIBANA_SERVICE_ACCOUNT_TOKEN="$token_value"

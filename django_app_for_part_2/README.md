@@ -1,8 +1,8 @@
-# 2026 Bootcamp CI/CD & Docker (pt. 2)
+# 2026 Bootcamp Docker (pt. 2)
 
 <!-- TOC -->
 
-- [Bootcamp CI/CD & Docker pt. 2](#bootcamp-cicd--docker-pt-2)
+- [Bootcamp Docker pt. 2](#2026-bootcamp-docker-pt-2)
     - [The Power of Docker](#the-power-of-docker)
         - [docker compose refresher](#docker-compose-refresher)
     - [Advanced Docker Compose Example](#advanced-docker-compose-example)
@@ -25,6 +25,7 @@
             - [Using Override Files](#using-override-files)
         - [Step 4: Use the Django Site to generate some Transactions](#step-4-use-the-django-site-to-generate-some-transactions)
         - [Step 5: Dive into APM](#step-5-dive-into-apm)
+        - [Step 6: Add an AI endpoint with a local LLM](#step-6-add-an-ai-endpoint-with-a-local-llm)
     - [Using docker compose override files to perform testing](#using-docker-compose-override-files-to-perform-testing)
     - [Challenges](#challenges)
         - [Challenge 1: Run the tests using a docker compose exec command](#challenge-1-run-the-tests-using-a-docker-compose-exec-command)
@@ -121,6 +122,8 @@ Postgres reads this file at startup (notice the `POSTGRES_PASSWORD_FILE` env var
 The first service created is the Postgres database. This allows our Django site to store and maintain it's application state. In this example, we simply use a local directory (via `volumes`) for its database storage, and you'll see that created automatically for you by compose. We also pass through some environment variables which represent how we connect to the postgress database from Django. We have added a healthcheck for this service so that our UI doesn't start up before it's database is ready.
 
 The second service is our [Django application](Django/). We use the `volumes` declaration to mount our Django code into the container. This allows us to make changes to the website code files, and have them reflected immediately via Django's autoreload mechanism. We also specify that we depend on the postgres service, by adding the `condition: service_healthy` flag under the `depends_on` section.
+
+> Heads up: the real [docker-compose.yml](Django/docker-compose.yml) has a couple of extra things the snippet above leaves out to keep it readable — some logging `labels`, OpenTelemetry environment variables, and a third service called `cache` (a Valkey instance, the same image from Part 1). We don't touch the cache until [Step 6](#step-6-add-an-ai-endpoint-with-a-local-llm), where it caches answers from our AI endpoint. For now it just starts up alongside everything else.
 
 #### Deploy Django Service
 
@@ -377,7 +380,7 @@ Let's create a poll using the admin interface in Django.
 
 ### Step 5: Dive into APM
 
-Now that we have some transactions, let's dive into one of the transaction categories to learn more information about that request. If you followed the above guide to create a poll using the admin interface, you should have a transaction called `POST django.contrib.admin.options.add_view`. Click on that transaction and you are brought to a page like this:
+Now that we have some transactions, let's dive into one of the transaction categories to learn more information about that request. If you followed the above guide to create a poll using the admin interface, you should have a transaction called `POST admin/polls/question/add/`. Click on that transaction and you are brought to a page like this:
 
 ![APM Overview](docs/post-apm-1.png)  
 
@@ -396,9 +399,143 @@ Try using the following endpoints and see what happens with APM:
 2. http://0.0.0.0:8000/sleep/3
 3. http://0.0.0.0:8000/error
 
+### Step 6: Add an AI endpoint with a local LLM
+
+> We've deployed a database, a web app, and a whole monitoring stack — all by pulling images and wiring them together with compose. Let's do one more: give our Django site an `/ask` endpoint backed by a large language model running entirely on your laptop. No cloud, no API keys, no bill.
+
+The trick is **Docker Model Runner (DMR)**, an inference engine built right into Docker Desktop. It runs models using `llama.cpp` under the hood and exposes an OpenAI-compatible API that any container can reach. Because it's part of the Docker engine itself, we don't even need to add a service to our compose file.
+
+#### Enable Docker Model Runner
+
+In Docker Desktop, go to **Settings → AI → Enable Docker Model Runner**, then apply. Verify it from your terminal:
+
+```bash
+$ docker model version
+
+Client:
+ Version:    v1.2.1
+ OS/Arch:    darwin/arm64
+```
+
+#### Pull a small model
+
+`ai/smollm2` is a 362-million-parameter model that's only ~270 MB — small enough to run on any laptop with no GPU. Models are pulled from Docker Hub as OCI artifacts (the same format as container images), so this should feel familiar:
+
+```bash
+$ docker model pull ai/smollm2
+
+Downloaded 270.60MB of 270.60MB
+Model pulled successfully
+```
+
+You can confirm it's there and even chat with it straight from the CLI:
+
+```bash
+$ docker model list
+
+MODEL NAME  PARAMETERS  QUANTIZATION    ARCHITECTURE  MODEL ID      SIZE
+ai/smollm2  361.82 M    IQ2_XXS/Q4_K_M  llama         354bf30d0aa3  256.35 MiB
+
+$ echo "What is Docker in one sentence?" | docker model run ai/smollm2
+```
+
+#### How the endpoint is wired up
+
+The code is already in the repo. There are three small pieces:
+
+**1. The view** ([Django/djangobootcamp/polls/views.py](Django/djangobootcamp/polls/views.py)) does the actual proxying. It reads a question from the form and POSTs it to the model's OpenAI-compatible API:
+
+```python
+LLM_BASE_URL = os.environ.get(
+    "LLM_BASE_URL", "http://model-runner.docker.internal/engines/v1"
+)
+LLM_MODEL = os.environ.get("LLM_MODEL", "ai/smollm2")
+
+def ask(request):
+    ...
+    response = requests.post(
+        f"{LLM_BASE_URL}/chat/completions",
+        json={
+            "model": LLM_MODEL,
+            "messages": [
+                {"role": "system", "content": "You are a helpful assistant. Answer in 2-3 short sentences."},
+                {"role": "user", "content": question},
+            ],
+        },
+        timeout=120,  # the first request is slow while the model loads into memory
+    )
+    answer = response.json()["choices"][0]["message"]["content"]
+    ...
+```
+
+> Notice the hostname: `model-runner.docker.internal`. When DMR is enabled, Docker makes the model reachable from *inside any container* at that address — the same idea as `host.docker.internal`, but for the model runner. That's why we don't need a new compose service.
+
+**2. The compose config** ([Django/docker-compose.yml](Django/docker-compose.yml)) passes those two values in as environment variables, so you can point at a different model or endpoint without touching code:
+
+```yaml
+    environment:
+      ...
+      LLM_BASE_URL: "http://model-runner.docker.internal/engines/v1"
+      LLM_MODEL: "ai/smollm2"
+```
+
+**3. A URL route** (`path('ask', views.ask, name='ask')`) and a small template hooking the form up to the view.
+
+Since `requirements.txt` changed (we added `requests`), rebuild and restart the web service so the new dependency is installed:
+
+```bash
+$ docker compose up -d --build
+```
+
+#### Ask it something
+
+Open http://0.0.0.0:8000/ask (there's also a link from the polls home page), type a question, and hit **Ask**. The first answer takes a few seconds while the model loads into memory; after that it's quick.
+
+That's it — an AI-powered web app running 100% on your machine, glued together with the exact same Docker primitives we've used all workshop.
+
+#### The payoff: see the LLM call in APM
+
+Here's where it all comes together. We added `opentelemetry-instrumentation-requests` to the project, which means OpenTelemetry automatically traces outbound HTTP calls. So if you're running with the OTel override from Step 3:
+
+```bash
+$ docker compose -f docker-compose.yml -f docker-compose.otel.yml up -d --build
+```
+
+...then ask a question and head back to the [APM view](http://localhost:5601/app/apm#/services/bootcamp-django/transactions) in Kibana. Open the `POST /ask` transaction and you'll see the call out to the model show up as its own span in the waterfall — the same way database queries do. You're now observing an LLM call with production-grade tooling, on your laptop.
+
+#### Caching answers with Valkey
+
+LLM calls are slow and (in the real world) expensive. A classic fix is to put a cache in front: if we've already answered a question, serve the saved answer instead of calling the model again. This is the **cache-aside** pattern, and it's a perfect job for the `cache` service (Valkey) that's been sitting in our compose file since Step 1.
+
+The `/ask` view does three things:
+
+1. **Look in the cache first.** Build a key from the model + question and ask Valkey for it.
+2. **On a miss, call the model** (what we just did above)...
+3. **...then write the answer back to the cache** with a time-to-live, so the next identical question is instant.
+
+```python
+cache = _cache_client()
+cache_key = "ask:" + hashlib.sha256(f"{LLM_MODEL}:{question}".encode()).hexdigest()
+
+cached_answer = cache.get(cache_key)        # 1. look first
+if cached_answer is not None:
+    return render(...)                      #    cache hit -> done, no LLM call
+
+answer = call_the_model(question)           # 2. miss -> ask the model
+cache.set(cache_key, answer, ex=CACHE_TTL)  # 3. save for next time
+```
+
+The cache connection is configured with environment variables in [docker-compose.yml](Django/docker-compose.yml) (`CACHE_HOST: cache`), exactly like the database and the LLM. If Valkey is ever unreachable, the code treats it as a cache miss and still answers — a cache outage should never take down the feature.
+
+> **Why the `redis` client for a Valkey server?** Valkey is a drop-in fork of Redis and speaks the same wire protocol, so the mature `redis` Python client talks to it perfectly. We use it here specifically because it has first-class OpenTelemetry auto-instrumentation (there's a `valkey` client too, but no OTel instrumentation for it yet) — which gives us the observability payoff below for free.
+
+**Try it:** ask the same question twice. The first answer says *"Generated by the model"*; the second comes back instantly with *"⚡ Served from the Valkey cache."*
+
+And here's the observability tie-in: because the `redis` client is auto-instrumented too, the cache lookups show up as their own spans alongside the LLM call. In the APM waterfall, a **cache miss** is a tall trace (Valkey `GET` → LLM call → Valkey `SET`), while a **cache hit** is a short one (just a Valkey `GET`). You can *see* the speedup, not just feel it.
+
 ### A bonus: automated end-to-end testing
 
-Visually checking Kibana is fine, but if we want a pass/fail signal we can hook into CI, we can run an end-to-end test instead. There's a script in the repo that does the whole thing for us:
+Visually checking Kibana is fine, but if we want a pass/fail signal we can automate, we can run an end-to-end test instead. There's a script in the repo that does the whole thing for us:
 
 ```bash
 $ ./scripts/test-apm-e2e.sh
@@ -409,6 +546,7 @@ Here's what it's doing under the hood:
 - starts Django with the `docker-compose.otel.yml` override
 - generates traffic against a few Django endpoints
 - queries Elasticsearch and fails the script unless it sees documents for `service.name=bootcamp-django` show up within the wait window
+- if Docker Model Runner is available, it also pulls the model, exercises the `/ask` endpoint from Step 6, and asserts that both the `/ask` transaction *and* the outbound span to the model runner were ingested (when DMR isn't available those `/ask` checks are skipped automatically)
 
 If you ever need to point this at a different service or give it more time to wait, you can override either via env vars:
 
@@ -441,7 +579,7 @@ web_1  | OK
 web_1  | Destroying test database for alias 'default'...
 ```
 
-That's all it took to run the tests! Which provides us the foundation for Continuous Integration (the CI part of CI/CD). If we hooked this test command into an automated system like Jenkins, we'd be able to deliver test results on each build. Pretty easy right? 
+That's all it took to run the tests! This is the foundation for automated testing — if we hooked this command into an automated build system, we'd get test results on every change. Pretty easy right? 
 
 ## Challenges
 ### Challenge 1: Run the tests using a `docker compose exec` command
@@ -587,6 +725,14 @@ Removing es               ... done
 Removing network elk_elastic
 Removing volume elk_esdata
 Removing volume elk_fbdata
+```
+
+#### (Optional) Remove the LLM model
+
+If you tried Step 6 and want to reclaim the disk space, you can remove the model too. It's small (~270 MB), so it's fine to keep around if you'd like to play with it later.
+
+```bash
+$ docker model rm ai/smollm2
 ```
 
 ### Fun Docker Containers

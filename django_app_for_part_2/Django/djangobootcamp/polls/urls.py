@@ -11,4 +11,5 @@ urlpatterns = [
     path('sleep', views.i_take_so_long_to_load, name='sleep'),
     path('sleep/<int:how_long>', views.i_take_so_long_to_load, name='sleep'),
     path('error', views.raise_error, name='error'),
+    path('ask', views.ask, name='ask'),
 ]
